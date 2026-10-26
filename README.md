@@ -11,3 +11,53 @@
 - Only pinky pointing up -> 'attach' to the hand and keep it in frame by automatically following
 *Failsafe during follow mode:*
 If hand is no longer detected stop movement descend slowly and deactivate
+
+## Workspace setup
+
+Each contributor should create their own Python virtual environment locally. Do not
+commit the `.venv` directory or other machine-specific files.
+
+### Create and activate the environment
+
+From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows PowerShell, activate it with:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Then install the shared project dependencies:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+The dependency file should contain only packages required by this project. Do not
+add machine-specific editable paths or the output of a full `pip freeze` unless
+the team has agreed to maintain a platform-specific lock file.
+
+Verify the selected environment with:
+
+```bash
+python -c "import cv2; import djitellopy; print('environment OK')"
+```
+
+In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
+`.venv`.
+
+Before committing, check that local files are ignored:
+
+```bash
+git status
+git check-ignore -v .venv/ .env __pycache__/
+```
+
+Commit `requirements.txt`, but keep `.venv/`, `.env`, `__pycache__/`, and other
+local or generated files untracked.
