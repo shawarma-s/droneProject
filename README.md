@@ -29,7 +29,24 @@ source .venv/bin/activate
 On Windows PowerShell, activate it with:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell says that running scripts is disabled, allow scripts only in the
+current PowerShell session, then activate the environment:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+This does not change the machine-wide execution policy; the setting goes away
+when you close that PowerShell window. Alternatively, skip activation and use
+the environment's Python executable directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Then install the shared project dependencies:
