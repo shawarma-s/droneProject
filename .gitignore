@@ -1,6 +1,7 @@
 report.pdf
 # Virtual environments
 .venv/
+hand_landmarker.task
 venv/
 env/
 ENV/
