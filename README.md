@@ -1,16 +1,21 @@
-# Gestures:
-- Thumb -> **move left**
-- Thumb + Index finger -> **move right**
-- Thumb, Index and Middle finger -> **move up**
-- Thumb, Index, Middle and Ring finger -> **move down**
-- All 5 finger up -> **move forward**
-- Touching index and thumb with other finger up 👌 -> **move backwards**
-- Index and middle finger pointing down -> **land**
+# Gestures mode:
+- Index up -> **move left**
+- Index + middle finger up -> **move right**
+- Index, Middle and ring finger up -> **move up**
+- Index, Middle, Ring and pinky up finger -> **move down**
+- index, ring, pinky up, middle down -> **move forward**
+- Index, middle, pinky up, ring down -> **move backwards**
+- index down, middle, ring and pinky up -> **land**
+- thumbs up -> **standby**
+- If hand is not detected -> wait 30 seconds before landing
 
 **Follow Mode:**
 - Only pinky pointing up -> 'attach' to the hand and keep it in frame by automatically following
 *Failsafe during follow mode:*
 If hand is no longer detected stop movement descend slowly and deactivate
+
+**Mediapipe hand landmarks diagram:**
+![alt text](hand_landmarks.png)
 
 ## Workspace setup
 
@@ -68,6 +73,24 @@ python -c "import cv2; import djitellopy; print('environment OK')"
 
 In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 `.venv`.
+
+## Run gesture recognition with the Tello camera (dry-run)
+
+This connects to the Tello, starts its video stream, and runs gesture recognition
+on the drone camera feed. Recognized
+commands are printed to the terminal only; no takeoff or movement commands are
+sent to the drone. Takeoff is disabled. Follow mode is recognized but does not
+control flight yet.
+
+1. Power on the Tello and connect your computer to the drone's Wi-Fi network.
+2. Run this from the repository root:
+
+   ```powershell
+   .\.venv\Scripts\python.exe droneControl.py
+   ```
+
+Press **Q** in the video window to quit. If the connection fails, confirm that
+your computer is connected to the Tello's Wi-Fi and try again.
 
 Before committing, check that local files are ignored:
 

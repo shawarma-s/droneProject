@@ -1,10 +1,14 @@
 from pathlib import Path
+import time
+from collections.abc import Callable
 from urllib.request import urlopen
 
 import cv2
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from numpy.typing import NDArray
 
 
 MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
@@ -49,7 +53,64 @@ def draw_landmarks(frame, hand_landmarks) -> None:
         cv2.circle(frame, point, 4, (0, 0, 255), -1)
 
 
-def main() -> None:
+def is_finger_extended(hand_landmarks, tip_index: int, pip_index: int) -> bool:
+    return hand_landmarks[tip_index].y < hand_landmarks[pip_index].y
+
+
+def is_thumb_pointing_up(hand_landmarks) -> bool:
+    thumb_mcp = hand_landmarks[2]
+    thumb_tip = hand_landmarks[4]
+    index_mcp = hand_landmarks[5]
+    pinky_mcp = hand_landmarks[17]
+
+    palm_width = (
+        (index_mcp.x - pinky_mcp.x) ** 2
+        + (index_mcp.y - pinky_mcp.y) ** 2
+    ) ** 0.5
+    thumb_length = (
+        (thumb_tip.x - thumb_mcp.x) ** 2
+        + (thumb_tip.y - thumb_mcp.y) ** 2
+    ) ** 0.5
+
+    return (
+        palm_width > 0
+        and thumb_tip.y < thumb_mcp.y
+        and thumb_length > palm_width * 0.35
+    )
+
+
+def classify_gesture(hand_landmarks) -> str:
+    finger_landmarks = {
+        "index": (8, 6),
+        "middle": (12, 10),
+        "ring": (16, 14),
+        "pinky": (20, 18),
+    }
+    raised_fingers = frozenset(
+        name
+        for name, (tip_index, pip_index) in finger_landmarks.items()
+        if is_finger_extended(hand_landmarks, tip_index, pip_index)
+    )
+    if not raised_fingers and is_thumb_pointing_up(hand_landmarks):
+        return "standby"
+
+    gestures = {
+        frozenset({"index"}): "move_left",
+        frozenset({"index", "middle"}): "move_right",
+        frozenset({"index", "middle", "ring"}): "move_up",
+        frozenset({"index", "middle", "ring", "pinky"}): "move_down",
+        frozenset({"index", "ring", "pinky"}): "move_forward",
+        frozenset({"index", "middle", "pinky"}): "move_backward",
+        frozenset({"middle", "ring", "pinky"}): "land",
+        frozenset({"pinky"}): "follow",
+    }
+    return gestures.get(raised_fingers, "none")
+
+
+def main(
+    on_gesture: Callable[[str], None] | None = None,
+    frame_provider: Callable[[], NDArray[np.uint8] | None] | None = None,
+) -> None:
     ensure_model()
     options = vision.HandLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=str(MODEL_PATH)),
@@ -60,17 +121,34 @@ def main() -> None:
         min_tracking_confidence=0.5,
     )
 
-    capture = cv2.VideoCapture(0)
-    if not capture.isOpened():
-        raise RuntimeError("Could not open the webcam.")
+    capture = None
+    if frame_provider is None:
+        capture = cv2.VideoCapture(0)
+        if not capture.isOpened():
+            raise RuntimeError("Could not open the webcam.")
 
     timestamp_ms = 0
+    previous_gesture = "none"
+    stable_gesture = "none"
+    gesture_frames = 0
+    required_stable_frames = 5
+    missing_hand_since = None
+    last_reported_gesture = "none"
+
     try:
         with vision.HandLandmarker.create_from_options(options) as hand_landmarker:
             while True:
-                ret, frame = capture.read()
-                if not ret:
-                    break
+                if capture is not None:
+                    ret, frame = capture.read()
+                    if not ret:
+                        raise RuntimeError("Could not read a frame from the webcam.")
+                else:
+                    if frame_provider is None:
+                        raise RuntimeError("No camera frame source is available.")
+                    frame = frame_provider()
+                    if frame is None:
+                        time.sleep(0.01)
+                        continue
 
                 frame = cv2.flip(frame, 1)
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -78,37 +156,51 @@ def main() -> None:
                 results = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
                 timestamp_ms += 1
 
-                for hand_landmarks in results.hand_landmarks:
+                if results.hand_landmarks:
+                    missing_hand_since = None
+                    hand_landmarks = results.hand_landmarks[0]
                     draw_landmarks(frame, hand_landmarks)
+                    gesture = classify_gesture(hand_landmarks)
+                    if gesture == previous_gesture:
+                        gesture_frames += 1
+                    else:
+                        previous_gesture = gesture
+                        gesture_frames = 1
+                        stable_gesture = "none"
 
-                    for landmark_id, landmark in enumerate(hand_landmarks):
-                        print(
-                            f"Landmark {landmark_id}: "
-                            f"(x: {landmark.x}, y: {landmark.y}, z: {landmark.z})"
-                        )
+                    if gesture_frames >= required_stable_frames:
+                        stable_gesture = gesture
+                else:
+                    if missing_hand_since is None:
+                        missing_hand_since = time.monotonic()
+                    previous_gesture = "none"
+                    gesture_frames = 0
+                    if time.monotonic() - missing_hand_since >= 30:
+                        stable_gesture = "land"
+                    else:
+                        stable_gesture = "none"
 
-                    thumb_tip = hand_landmarks[4]
-                    index_tip = hand_landmarks[8]
-                    distance = (
-                        (thumb_tip.x - index_tip.x) ** 2
-                        + (thumb_tip.y - index_tip.y) ** 2
-                    ) ** 0.5
-                    label = "Pinch" if distance < 0.05 else "Open Hand"
-                    cv2.putText(
-                        frame,
-                        label,
-                        (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 0),
-                        2,
-                    )
+                if stable_gesture != last_reported_gesture:
+                    if stable_gesture != "none" and on_gesture is not None:
+                        on_gesture(stable_gesture)
+                    last_reported_gesture = stable_gesture
+
+                cv2.putText(
+                    frame,
+                    f"Gesture: {stable_gesture}",
+                    (50, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
 
                 cv2.imshow("Hand Tracking", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
     finally:
-        capture.release()
+        if capture is not None:
+            capture.release()
         cv2.destroyAllWindows()
 
 
