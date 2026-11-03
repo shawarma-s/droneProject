@@ -1,4 +1,4 @@
-from djitellopy import Tello
+from djitellopy import Tello, TelloException
 
 from imageProcessing import main as run_gesture_recognition
 
@@ -54,16 +54,25 @@ def main() -> None:
 
         battery = tello.get_battery()
         print(f"Connected to the Tello. Battery: {battery}%")
+        print("Taking off...")
+        try:
+            tello.takeoff()
+        except TelloException as error:
+            raise RuntimeError(
+                "The Tello did not accept the takeoff command. "
+                "Make sure it is on a level surface, has sufficient battery, "
+                "and is not already flying. Confirm that the Tello app is not "
+                "connected before trying again."
+            ) from error
+        airborne = True
+        print(f"Ascending to approximately {TAKEOFF_HEIGHT_CM} cm...")
+        tello.move_up(TAKEOFF_HEIGHT_CM)
+
         print("Starting the Tello video stream...")
         tello.streamon()
         stream_started = True
         frame_reader = tello.get_frame_read()
 
-        print("Taking off...")
-        tello.takeoff()
-        airborne = True
-        print(f"Ascending to approximately {TAKEOFF_HEIGHT_CM} cm...")
-        tello.move_up(TAKEOFF_HEIGHT_CM)
         print(
             "Gesture control is active. Each movement gesture moves the drone "
             f"{MOVEMENT_DISTANCE_CM} cm."
