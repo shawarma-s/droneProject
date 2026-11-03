@@ -34,7 +34,8 @@ def main() -> None:
         tello.streamon()
         stream_started = True
         frame_reader = tello.get_frame_read()
-
+        tello.takeoff()
+        
 
         print(
             "Using the Tello camera in gesture dry-run mode. "
@@ -46,10 +47,7 @@ def main() -> None:
             on_gesture=report_run_command,
             frame_provider=lambda: frame_reader.frame,
         )
-        tello.takeoff()
-        if tello.takeoff() is True:
-             tello.move_up(150) 
-             print("Drone has taken off. Raised to 150 cm.")
+        
 
     finally:
         try:
