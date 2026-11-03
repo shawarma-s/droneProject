@@ -17,6 +17,13 @@ If hand is no longer detected stop movement descend slowly and deactivate
 **Mediapipe hand landmarks diagram:**
 ![alt text](hand_landmarks.png)
 
+## Telemetry
+- Receive telemetry data from the drone to the host laptop
+- Accelerometer, distance sensor, gyroscrope readings, battery status, signal strength
+- Create a second window (apart from the camera view) that has an interface showing telemetry data, a picture of the drone that rotates as the actual drone does (use the gryo and/or accelerometer to get the data to transform the image)
+- Window also has a button that allows the user to enable/disable gesture control and take over manual control of the drone using the keyboard (arrow keys for movement, comma and period for down and up respectively, f for do a flip if it's possible)
+- Window also shows signal strenght, battery level, etc.
+
 ## Workspace setup
 
 Each contributor should create their own Python virtual environment locally. Do not
@@ -77,8 +84,8 @@ In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 ## Run gesture control with the Tello camera
 
 This connects to the Tello, starts its video stream, and runs gesture control
-on the drone camera feed. The drone takes off and rises approximately 150 cm.
-Each stable movement gesture moves the drone 10 cm. The `land` gesture and
+on the drone camera feed. The drone takes off and begins gesture control at
+its normal takeoff height. Each stable movement gesture moves the drone 10 cm. The `land` gesture and
 pressing **Q** land the drone. Follow mode is recognized but does not control
 flight yet.
 
