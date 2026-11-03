@@ -3,13 +3,13 @@ from djitellopy import Tello
 from imageProcessing import main as run_gesture_recognition
 
 
-def report_dry_run_command(gesture: str) -> None:
+def report_run_command(gesture: str) -> True:
     if gesture == "standby":
-        print("Recognized standby gesture; no drone command sent.")
+        print("Recognized standby gesture; Drone is on standby, awaiting commands.")
     elif gesture == "follow":
-        print("Recognized follow gesture; follow control is not implemented.")
+        print("Recognized follow gesture; follow control is implemented.")
     else:
-        print(f"Recognized command: {gesture} [DRY RUN: not sent to drone]")
+        print(f"Recognized command: {gesture} [Command sent to drone]")
 
 
 def main() -> None:
@@ -27,14 +27,17 @@ def main() -> None:
         frame_reader = tello.get_frame_read()
 
         print(
-            "Using the Tello camera in gesture dry-run mode. "
-            "No takeoff or movement commands will be sent."
-        )
-        run_gesture_recognition(
-            on_gesture=report_dry_run_command,
-            frame_provider=lambda: frame_reader.frame,
-        )
-    finally:
+            "Using the Tello camera in gesture run mode. "
+            "Takeoff and movement commands will be sent.")
+        
+        tello.takeoff()
+        if tello.takeoff() == True:
+            print("Drone has taken off successfully.")
+            tello.move_up(150)  # Move up by 150 cm
+            if tello.move_up(150) == True:
+                print("Drone has moved up by 150 cm.")
+            run_gesture_recognition(on_gesture=report_run_command, frame_provider=lambda: frame_reader.frame,)
+    finally:  
         try:
             if stream_started:
                 tello.streamoff()
