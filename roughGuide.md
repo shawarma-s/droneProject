@@ -1,8 +1,9 @@
-The repository currently has the dependency list in `requirements.txt`, but the three Python modules are empty:
+The repository contains the dependency list in `requirements.txt` and separates
+the system into three responsibilities:
 
-- `imageProcessing.py`
-- `droneControl.py`
-- `telemetry.py`
+- `imageProcessing.py` handles camera frames, landmarks, and gestures.
+- `droneControl.py` owns the Tello connection and flight commands.
+- `telemetry.py` reports drone and control state.
 
 The README describes two related systems: gesture-based movement and a pinky-triggered follow mode. A clean setup would separate those responsibilities rather than placing all logic in one loop.
 
@@ -10,7 +11,7 @@ The README describes two related systems: gesture-based movement and a pinky-tri
 
 The project already declares:
 
-- OpenCV for camera input and image display.
+- OpenCV for image conversion, drawing, and display.
 - `djitellopy` for communicating with the Tello.
 
 The hand detector is a separate concern. OpenCV can capture and process frames, but it does not by itself identify fingertips or count raised fingers. The project therefore needs either:
@@ -24,9 +25,9 @@ The environment setup should include:
 2. Install `requirements.txt`.
 3. Add the chosen hand-landmark dependency if it is not already included in the report’s setup.
 4. Confirm that Python can import OpenCV, `djitellopy`, and the hand-tracking package.
-5. Test the webcam independently before connecting the drone.
+5. Test the detector with a saved image or video before connecting the drone.
 
-Do not begin with the drone connected. First verify that the camera can produce frames and that hand landmarks can be drawn on those frames.
+Do not begin with the drone flying. First verify that the detector can process frames and that hand landmarks can be drawn on those frames. The Tello must be connected to the computer's Wi-Fi network when its camera stream is used.
 
 ## 2. Establish the OpenCV processing pipeline
 
@@ -34,15 +35,14 @@ Do not begin with the drone connected. First verify that the camera can produce 
 
 Its processing pipeline should be conceptually:
 
-1. Open the webcam with `cv2.VideoCapture`.
-2. Read a frame.
-3. Convert the frame into the color format expected by the hand detector.
-4. Run hand detection or landmark estimation.
-5. Extract the landmarks for the detected hand.
-6. Determine which fingers are extended.
-7. Return a structured result to the control layer.
-8. Draw optional diagnostic landmarks and labels for the operator.
-9. Display the frame and provide a clean quit path.
+1. Receive a BGR frame from the selected camera source.
+2. Convert the frame into the color format expected by the hand detector.
+3. Run hand detection or landmark estimation.
+4. Extract the landmarks for the detected hand.
+5. Determine which fingers are extended.
+6. Return a structured result to the control layer.
+7. Draw optional diagnostic landmarks and labels for the operator.
+8. Display the frame and provide a clean quit path.
 
 The image-processing module should not directly call Tello movement methods. Instead, it should return information such as:
 
@@ -54,7 +54,136 @@ The image-processing module should not directly call Tello movement methods. Ins
 
 That separation makes it possible to test gesture recognition with prerecorded camera footage without risking drone movement.
 
-## 3. Represent gestures as data
+## 3. Use the Tello's built-in camera with OpenCV
+
+The Tello camera is not opened with `cv2.VideoCapture(0)`. The Tello sends
+video over its Wi-Fi connection, and `djitellopy` exposes decoded frames
+through `get_frame_read()`.
+
+The computer must be connected to the Tello's Wi-Fi network before calling
+`connect()`. A basic camera-only setup is:
+
+```python
+import cv2
+from djitellopy import Tello
+
+tello = Tello()
+tello.connect()
+tello.streamon()
+frame_reader = tello.get_frame_read()
+
+try:
+    while True:
+        frame = frame_reader.frame
+        if frame is None:
+            continue
+
+        # Pass this BGR OpenCV frame to imageProcessing.py.
+        # Do not call takeoff or movement methods in this loop yet.
+        cv2.imshow("Tello camera", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+finally:
+    tello.streamoff()
+    cv2.destroyAllWindows()
+    tello.end()
+```
+
+`frame_reader.frame` is already a NumPy image in the BGR format normally used
+by OpenCV. `imageProcessing.py` should convert it to RGB only when constructing
+the MediaPipe image:
+
+```python
+rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+mp_image = mp.Image(
+    image_format=mp.ImageFormat.SRGB,
+    data=rgb_frame,
+)
+```
+
+Do not convert the frame to RGB before drawing with OpenCV unless it is
+converted back to BGR for display. OpenCV drawing and display use BGR.
+
+### Separate the camera source from image processing
+
+The current prototype opens a webcam inside `main()` with:
+
+```python
+capture = cv2.VideoCapture(0)
+```
+
+To use the Tello camera, move the per-frame MediaPipe work into a function
+that accepts an OpenCV frame. For example:
+
+```python
+def process_frame(frame, hand_landmarker, timestamp_ms):
+    frame = cv2.flip(frame, 1)
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(
+        image_format=mp.ImageFormat.SRGB,
+        data=rgb_frame,
+    )
+    results = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
+
+    # Draw landmarks and classify gestures here.
+    # Return the annotated frame and structured vision data.
+    return frame, results
+```
+
+Then `droneControl.py` owns the Tello connection and supplies frames:
+
+```python
+tello.connect()
+tello.streamon()
+frame_reader = tello.get_frame_read()
+
+try:
+    while running:
+        frame = frame_reader.frame
+        if frame is None:
+            continue
+
+        annotated_frame, vision_result = process_frame(
+            frame,
+            hand_landmarker,
+            timestamp_ms,
+        )
+        timestamp_ms += 1
+        cv2.imshow("Tello Hand Tracking", annotated_frame)
+finally:
+    tello.streamoff()
+    tello.end()
+```
+
+The result can be a dataclass or dictionary containing `detected`, `gesture`,
+`center`, `hand_size`, and the landmarks. The important boundary is:
+
+```text
+droneControl.py: Tello connection and frame source
+    -> imageProcessing.py: landmarks and gesture interpretation
+    -> droneControl.py: validated command and safety handling
+```
+
+Do not call `tello.takeoff()`, `move_*()`, or `send_rc_control()` from
+`imageProcessing.py`.
+
+### Tello stream lifecycle and practical issues
+
+- Call `streamon()` only after connecting and call `streamoff()` during cleanup.
+- Always use `try/finally`; closing the display window should not leave the
+  stream running indefinitely.
+- `frame_reader.frame` can temporarily be `None` or repeat the previous frame.
+  Check it before processing and use monotonically increasing timestamps for
+  MediaPipe video mode.
+- The stream has network latency and lower image quality than many webcams.
+  Avoid printing every landmark on every frame.
+- Keep the drone landed while validating gestures. A stream connection does
+  not mean that flight commands are safe to enable.
+- If the stream stops producing usable frames, stop movement and enter the
+  failsafe state rather than treating the last gesture as current.
+
+## 4. Represent gestures as data
 
 The README in `README.md` lists the desired gesture meanings. The implementation should translate detector output into a neutral gesture representation before translating it into a drone command.
 
@@ -80,7 +209,7 @@ A gesture should normally be accepted only after it has remained stable for seve
 
 The gesture recognizer should also have an explicit “unknown” or “no command” result. It should not interpret every failed detection as a movement.
 
-## 4. Set up the Tello connection
+## 5. Set up the Tello connection
 
 `droneControl.py` should own the drone lifecycle.
 
@@ -89,7 +218,9 @@ The control setup should follow this order:
 1. Create the Tello object.
 2. Connect to the drone.
 3. Read and log the battery level.
-4. Start the video stream only if the implementation uses the drone’s camera; otherwise keep the webcam and drone-video paths distinct.
+4. Start the Tello video stream and obtain a `FrameRead` object when using the
+   drone's camera. Do not create a second `cv2.VideoCapture` for the same
+   processing loop.
 5. Keep the drone landed while testing gesture recognition.
 6. Send takeoff only after an explicit operator action.
 7. Send movement commands through a single command interface.
@@ -104,7 +235,7 @@ The control module should not allow image-processing code to call arbitrary dron
 - whether another command is already active;
 - whether the command should be sent once or continuously.
 
-## 5. Choose the movement-control model
+## 6. Choose the movement-control model
 
 The README describes movement actions rather than continuous joystick control. There are two common ways to implement that:
 
@@ -127,7 +258,7 @@ This is more appropriate for follow mode and responsive steering, but it require
 
 For this project, it is useful to keep the gesture recognizer independent of which of these movement strategies is eventually selected.
 
-## 6. Add a command state machine
+## 7. Add a command state machine
 
 A small state machine will prevent conflicts between gestures and follow mode. Possible states include:
 
@@ -152,7 +283,7 @@ The state machine should define rules such as:
 
 This logic belongs in `droneControl.py`, not in the OpenCV drawing code.
 
-## 7. Implement follow mode using landmark geometry
+## 8. Implement follow mode using landmark geometry
 
 Follow mode requires more than recognizing the pinky gesture. Once activated, the program must continuously estimate where the hand is relative to the camera image.
 
@@ -173,7 +304,7 @@ The controller should smooth these values over multiple frames and limit the max
 
 Follow mode should also have an explicit activation and deactivation rule. A temporary pinky-detection failure should not necessarily activate or deactivate the mode immediately; use a short confirmation window. However, once the hand is genuinely lost while following, the failsafe must take priority over normal tracking.
 
-## 8. Implement the follow-mode failsafe
+## 9. Implement the follow-mode failsafe
 
 The README requires that, when the hand is no longer detected during follow mode, the drone should:
 
@@ -194,7 +325,7 @@ The failsafe should also be triggered by:
 
 The exact response should be tested while the drone is restrained or simulated before attempting a free flight.
 
-## 9. Use telemetry separately
+## 10. Use telemetry separately
 
 `telemetry.py` can periodically collect and display or log:
 
@@ -209,25 +340,25 @@ The exact response should be tested while the drone is restrained or simulated b
 
 Telemetry should not decide movement. It should report state to the operator and provide diagnostics when tuning gesture thresholds or follow behavior.
 
-## 10. Test in stages
+## 11. Test in stages
 
 A safe progression would be:
 
-1. Test webcam capture only.
-2. Test hand landmarks and visual overlays.
-3. Test finger-state classification without a drone.
+1. Test image processing with a saved image or prerecorded video.
+2. Test hand landmarks and visual overlays using the Tello camera while landed.
+3. Test finger-state classification without sending drone commands.
 4. Test gesture stability and transitions using logged frames.
 5. Connect to the Tello and read telemetry while it remains landed.
 6. Verify that commands are generated but initially intercepted or logged.
 7. Test individual movements in a clear indoor area with a human pilot ready to intervene.
-8. Test hand-loss handling while the drone is stationary.
+8. Test hand-loss and video-stream-loss handling while the drone is stationary.
 9. Test follow mode at low speed and short range.
-10. Test landing, quit, connection loss, and low-battery paths.
+10. Test landing, quit, connection loss, stream failure, and low-battery paths.
 
 The most important architectural principle is to keep the pipeline modular:
 
 ```text
-OpenCV camera
+Tello camera stream
     -> hand landmarks
     -> gesture/follow interpretation
     -> validated command state
