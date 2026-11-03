@@ -1,21 +1,45 @@
-from djitellopy import Tello, tello
+from djitellopy import Tello
 
 from imageProcessing import main as run_gesture_recognition
 
 
-def report_run_command(gesture: str) -> None:
-    if gesture == "standby":
-        print("Recognized standby gesture; Drone is on standby, awaiting commands.")
-    elif gesture == "follow":
-        print("Recognized follow gesture; follow control is not enabled.")
-    else:
-        print(f"Recognized command: {gesture} [dry run; no command sent]")
+MOVEMENT_DISTANCE_CM = 10
+TAKEOFF_HEIGHT_CM = 150
 
 
 def main() -> None:
     tello = Tello()
     connected = False
+    airborne = False
     stream_started = False
+
+    def handle_gesture(gesture: str) -> None:
+        nonlocal airborne
+
+        if not airborne:
+            return
+
+        movement_commands = {
+            "move_left": tello.move_left,
+            "move_right": tello.move_right,
+            "move_up": tello.move_up,
+            "move_down": tello.move_down,
+            "move_forward": tello.move_forward,
+            "move_backward": tello.move_back,
+        }
+
+        if gesture == "land":
+            print("Landing gesture recognized. Landing the drone.")
+            tello.land()
+            airborne = False
+        elif gesture == "standby":
+            print("Standby gesture recognized; holding position.")
+        elif gesture == "follow":
+            print("Follow gesture recognized; follow mode is not enabled.")
+        elif gesture in movement_commands:
+            print(f"Recognized {gesture}; moving {MOVEMENT_DISTANCE_CM} cm.")
+            movement_commands[gesture](MOVEMENT_DISTANCE_CM)
+
     try:
         print("Connecting to the Tello...")
         try:
@@ -35,29 +59,32 @@ def main() -> None:
         stream_started = True
         frame_reader = tello.get_frame_read()
 
-
+        print("Taking off...")
+        tello.takeoff()
+        airborne = True
+        print(f"Ascending to approximately {TAKEOFF_HEIGHT_CM} cm...")
+        tello.move_up(TAKEOFF_HEIGHT_CM)
         print(
-            "Using the Tello camera in gesture dry-run mode. "
-            "The drone will remain landed and no flight commands will be sent."
+            "Gesture control is active. Each movement gesture moves the drone "
+            f"{MOVEMENT_DISTANCE_CM} cm."
         )
-        print("Press Q in the video window to stop.")
+        print("Press Q in the video window to land and stop.")
 
         run_gesture_recognition(
-            on_gesture=report_run_command,
+            on_gesture=handle_gesture,
             frame_provider=lambda: frame_reader.frame,
         )
-        tello.takeoff()
-        if tello.takeoff() is True:
-             tello.move_up(150) 
-             print("Drone has taken off. Raised to 150 cm.")
-
     finally:
         try:
-            if stream_started:
-                tello.streamoff()
+            if airborne:
+                print("Landing the drone before shutdown.")
+                tello.land()
         finally:
-            tello.land()
-            tello.end()
+            try:
+                if stream_started:
+                    tello.streamoff()
+            finally:
+                tello.end()
         if connected:
             print("Disconnected from the Tello.")
 

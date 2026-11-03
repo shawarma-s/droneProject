@@ -74,13 +74,13 @@ python -c "import cv2; import djitellopy; print('environment OK')"
 In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 `.venv`.
 
-## Run gesture recognition with the Tello camera (dry-run)
+## Run gesture control with the Tello camera
 
-This connects to the Tello, starts its video stream, and runs gesture recognition
-on the drone camera feed. Recognized
-commands are printed to the terminal only; no takeoff or movement commands are
-sent to the drone. Takeoff is disabled. Follow mode is recognized but does not
-control flight yet.
+This connects to the Tello, starts its video stream, and runs gesture control
+on the drone camera feed. The drone takes off and rises approximately 150 cm.
+Each stable movement gesture moves the drone 10 cm. The `land` gesture and
+pressing **Q** land the drone. Follow mode is recognized but does not control
+flight yet.
 
 1. Power on the Tello and connect your computer to the drone's Wi-Fi network.
 2. Run this from the repository root:
@@ -89,8 +89,12 @@ control flight yet.
    .\.venv\Scripts\python.exe droneControl.py
    ```
 
-Press **Q** in the video window to quit. If the connection fails, confirm that
-your computer is connected to the Tello's Wi-Fi and try again.
+Press **Q** in the video window to land and stop. If the connection fails,
+confirm that your computer is connected to the Tello's Wi-Fi and try again.
+
+Do not run this with people, obstacles, or fragile objects nearby. Keep a clear
+landing area and be ready to disconnect the battery if the drone behaves
+unexpectedly.
 
 Before committing, check that local files are ignored:
 
