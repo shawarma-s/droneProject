@@ -158,27 +158,8 @@ def main() -> None:
         tello.streamon()
         stream_started = True
         frame_reader = tello.get_frame_read()
-
-        print("Taking off...")
         tello.takeoff()
-        airborne = True
-        command_stop = threading.Event()
-
-        def run_commands() -> None:
-            while not command_stop.is_set() or not command_queue.empty():
-                try:
-                    _, command = command_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                try:
-                    command()
-                except Exception as error:
-                    print(f"Tello command failed: {error}")
-                finally:
-                    command_queue.task_done()
-
-        command_thread = threading.Thread(target=run_commands, daemon=True)
-        command_thread.start()
+        
 
         print(
             "Gesture control is active. Each movement gesture moves the drone "
@@ -192,6 +173,8 @@ def main() -> None:
             on_hand=update_follow,
             on_key=handle_key,
         )
+        
+
     finally:
         try:
             if "command_stop" in locals():
