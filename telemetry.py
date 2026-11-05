@@ -20,7 +20,8 @@ class DroneIndicator(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.yaw = 0.0
-        self.setMinimumSize(260, 180)
+        self.setMinimumSize(260, 210)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
     def set_yaw(self, yaw: float) -> None:
         self.yaw = yaw
@@ -33,19 +34,29 @@ class DroneIndicator(QtWidgets.QWidget):
         del event
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor("#20242b"))
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor("#11112d"))
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 16, 16)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#28245c"), 1))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 16, 16)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#252052"), 1))
+        for x in range(24, self.width(), 32):
+            painter.drawLine(x, 12, x, self.height() - 12)
+        for y in range(20, self.height(), 32):
+            painter.drawLine(12, y, self.width() - 12, y)
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(-self.yaw)
 
-        painter.setPen(QtGui.QPen(QtGui.QColor("#6ee7b7"), 3))
-        painter.setBrush(QtGui.QColor("#14532d"))
-        painter.drawRoundedRect(-70, -35, 140, 70, 18, 18)
-        painter.setBrush(QtGui.QColor("#fbbf24"))
-        painter.drawEllipse(-12, -12, 24, 24)
-        painter.setPen(QtGui.QPen(QtGui.QColor("#60a5fa"), 3))
-        painter.drawLine(0, -35, 0, -75)
-        painter.drawLine(-12, -63, 0, -75)
-        painter.drawLine(12, -63, 0, -75)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#ff3d81"), 3))
+        painter.setBrush(QtGui.QColor("#241b55"))
+        painter.drawRoundedRect(-72, -35, 144, 70, 18, 18)
+        painter.setBrush(QtGui.QColor("#ff3d81"))
+        painter.drawEllipse(-11, -11, 22, 22)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#7c4dff"), 4))
+        painter.drawLine(0, -35, 0, -78)
+        painter.drawLine(-13, -65, 0, -78)
+        painter.drawLine(13, -65, 0, -78)
 
 
 class TelemetryWindow(QtWidgets.QWidget):
@@ -69,6 +80,9 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.manual_timer = QtCore.QTimer(self)
         self.manual_timer.timeout.connect(self._send_manual_control)
         self.manual_timer.start(100)
+        application = QtWidgets.QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self)
         self.command_stop = threading.Event()
         self.command_thread = threading.Thread(
             target=self._run_commands,
@@ -78,8 +92,89 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.command_thread.start()
 
         self.setWindowTitle("Tello Telemetry and Control")
-        self.resize(440, 650)
+        self.resize(760, 820)
+        self.setMinimumSize(620, 680)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setStyleSheet(
+            """
+            QWidget {
+                color: #f3f1ff;
+                font-family: "Avenir Next", "Segoe UI", sans-serif;
+                font-size: 13px;
+            }
+            QMainWindow, QWidget#telemetryRoot {
+                background: #080820;
+            }
+            QLabel#eyebrow {
+                color: #9c8cff;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }
+            QLabel#pageTitle {
+                color: #ffffff;
+                font-size: 26px;
+                font-weight: 800;
+            }
+            QLabel#subtitle {
+                color: #9692b7;
+                font-size: 12px;
+            }
+            QFrame#card {
+                background: #11112d;
+                border: 1px solid #252052;
+                border-radius: 16px;
+            }
+            QLabel#cardTitle {
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            QLabel#metricName {
+                color: #918cae;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QLabel#metricValue {
+                color: #ffffff;
+                font-size: 20px;
+                font-weight: 800;
+            }
+            QLabel#metricAccent {
+                color: #ff3d81;
+                font-size: 20px;
+                font-weight: 800;
+            }
+            QLabel#status {
+                background: #182b36;
+                border: 1px solid #2ee6a6;
+                border-radius: 10px;
+                color: #5ff0bd;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 8px 12px;
+            }
+            QPushButton {
+                background: #6d3df5;
+                border: 1px solid #8e6cff;
+                border-radius: 10px;
+                color: white;
+                font-weight: 700;
+                padding: 11px 16px;
+            }
+            QPushButton:hover {
+                background: #8057ff;
+            }
+            QPushButton:pressed {
+                background: #572bcf;
+            }
+            QLabel#hint {
+                color: #8985a7;
+                font-size: 11px;
+            }
+            """
+        )
+        self.setObjectName("telemetryRoot")
 
         self.labels = {
             "battery": QtWidgets.QLabel("-- %"),
@@ -93,15 +188,9 @@ class TelemetryWindow(QtWidgets.QWidget):
             "mode": QtWidgets.QLabel("Gesture control enabled"),
         }
 
-        telemetry_layout = QtWidgets.QFormLayout()
-        telemetry_layout.addRow("Battery:", self.labels["battery"])
-        telemetry_layout.addRow("Height:", self.labels["height"])
-        telemetry_layout.addRow("Distance:", self.labels["distance"])
-        telemetry_layout.addRow("Pitch:", self.labels["pitch"])
-        telemetry_layout.addRow("Roll:", self.labels["roll"])
-        telemetry_layout.addRow("Yaw:", self.labels["yaw"])
-        telemetry_layout.addRow("Acceleration X / Y / Z:", self.labels["acceleration"])
-        telemetry_layout.addRow("Wi-Fi signal:", self.labels["signal"])
+        for name, label in self.labels.items():
+            if name != "mode":
+                label.setObjectName("metricValue")
 
         self.mode_button = QtWidgets.QPushButton("Disable gesture control")
         self.mode_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -109,17 +198,73 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.indicator = DroneIndicator()
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(QtWidgets.QLabel("Drone telemetry"))
-        layout.addLayout(telemetry_layout)
-        layout.addWidget(self.indicator)
-        layout.addWidget(self.labels["mode"])
-        layout.addWidget(self.mode_button)
-        layout.addWidget(
-            QtWidgets.QLabel(
-                "Manual controls: arrows = horizontal, ,/. = down/up, "
-                "S or , = down; . = up; F = take off when landed"
-            )
+        layout.setContentsMargins(26, 22, 26, 22)
+        layout.setSpacing(16)
+
+        eyebrow = QtWidgets.QLabel("TELLO / FLIGHT SYSTEM")
+        eyebrow.setObjectName("eyebrow")
+        title = QtWidgets.QLabel("Drone telemetry")
+        title.setObjectName("pageTitle")
+        subtitle = QtWidgets.QLabel("Live flight data and control center")
+        subtitle.setObjectName("subtitle")
+        header = QtWidgets.QVBoxLayout()
+        header.setSpacing(3)
+        header.addWidget(eyebrow)
+        header.addWidget(title)
+        header.addWidget(subtitle)
+        layout.addLayout(header)
+
+        metrics_card = QtWidgets.QFrame()
+        metrics_card.setObjectName("card")
+        metrics_layout = QtWidgets.QGridLayout(metrics_card)
+        metrics_layout.setContentsMargins(18, 16, 18, 16)
+        metrics_layout.setHorizontalSpacing(28)
+        metrics_layout.setVerticalSpacing(16)
+        metric_specs = [
+            ("battery", "BATTERY", 0, 0),
+            ("height", "ALTITUDE", 0, 1),
+            ("distance", "DISTANCE", 0, 2),
+            ("pitch", "PITCH", 1, 0),
+            ("roll", "ROLL", 1, 1),
+            ("yaw", "YAW", 1, 2),
+            ("acceleration", "ACCELERATION X / Y / Z", 2, 0),
+            ("signal", "WI-FI SIGNAL", 2, 2),
+        ]
+        for key, name, row, column in metric_specs:
+            metric = QtWidgets.QVBoxLayout()
+            metric.setSpacing(3)
+            metric_name = QtWidgets.QLabel(name)
+            metric_name.setObjectName("metricName")
+            metric.addWidget(metric_name)
+            metric.addWidget(self.labels[key])
+            metrics_layout.addLayout(metric, row, column, 1, 2 if key == "acceleration" else 1)
+        layout.addWidget(metrics_card)
+
+        indicator_card = QtWidgets.QFrame()
+        indicator_card.setObjectName("card")
+        indicator_layout = QtWidgets.QVBoxLayout(indicator_card)
+        indicator_layout.setContentsMargins(18, 14, 18, 14)
+        indicator_title = QtWidgets.QLabel("AIRCRAFT ORIENTATION")
+        indicator_title.setObjectName("cardTitle")
+        indicator_layout.addWidget(indicator_title)
+        indicator_layout.addWidget(self.indicator)
+        layout.addWidget(indicator_card, 1)
+
+        controls_card = QtWidgets.QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QtWidgets.QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(18, 14, 18, 14)
+        controls_layout.setSpacing(10)
+        self.labels["mode"].setObjectName("status")
+        controls_layout.addWidget(self.labels["mode"])
+        controls_layout.addWidget(self.mode_button)
+        hint = QtWidgets.QLabel(
+            "Manual: arrows move  •  S or , descend  •  . ascend  •  F take off  •  L land"
         )
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        controls_layout.addWidget(hint)
+        layout.addWidget(controls_card)
 
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.update_telemetry)
@@ -144,6 +289,15 @@ class TelemetryWindow(QtWidgets.QWidget):
             self.command_queue.put_nowait((name, command))
         except queue.Full:
             self.labels["mode"].setText("Command skipped: another command is pending")
+
+    def _clear_pending_commands(self) -> None:
+        while True:
+            try:
+                self.command_queue.get_nowait()
+            except queue.Empty:
+                return
+            else:
+                self.command_queue.task_done()
 
     def _show_command_error(self, message: str) -> None:
         self.labels["mode"].setText(message)
@@ -173,6 +327,59 @@ class TelemetryWindow(QtWidgets.QWidget):
 
         self.tello.send_rc_control(left_right, forward, up_down, 0)
 
+    def _manual_key_codes(self) -> set[int]:
+        return {
+            QtCore.Qt.Key.Key_Left,
+            QtCore.Qt.Key.Key_Right,
+            QtCore.Qt.Key.Key_Up,
+            QtCore.Qt.Key.Key_Down,
+            QtCore.Qt.Key.Key_Comma,
+            QtCore.Qt.Key.Key_S,
+            QtCore.Qt.Key.Key_Period,
+        }
+
+    def _handle_key_press(self, key: int, auto_repeat: bool = False) -> bool:
+        if key == QtCore.Qt.Key.Key_F:
+            if not auto_repeat and self.key_callback is not None:
+                self.key_callback("f")
+            return True
+
+        if key == QtCore.Qt.Key.Key_L:
+            if not auto_repeat and not self.gesture_enabled and self.key_callback is not None:
+                self.key_callback("l")
+            return True
+
+        if self.gesture_enabled or key not in self._manual_key_codes():
+            return False
+
+        self.manual_keys.add(key)
+        self._send_manual_control()
+        return True
+
+    def _handle_key_release(self, key: int) -> bool:
+        if key in self.manual_keys:
+            self.manual_keys.discard(key)
+            self._send_manual_control()
+            return True
+        return False
+
+    def eventFilter(
+        self,
+        watched: QtCore.QObject,
+        event: QtCore.QEvent,
+    ) -> bool:
+        if not self.isActiveWindow():
+            return super().eventFilter(watched, event)
+        if event.type() == QtCore.QEvent.Type.KeyPress:
+            key_event = event
+            return self._handle_key_press(
+                key_event.key(),
+                key_event.isAutoRepeat(),
+            )
+        if event.type() == QtCore.QEvent.Type.KeyRelease:
+            return self._handle_key_release(event.key())
+        return super().eventFilter(watched, event)
+
     def toggle_control_mode(self) -> None:
         self.gesture_enabled = not self.gesture_enabled
         if self.gesture_enabled:
@@ -189,35 +396,13 @@ class TelemetryWindow(QtWidgets.QWidget):
             self.command_callback("gesture_enabled" if self.gesture_enabled else "manual")
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
-        if event.key() == QtCore.Qt.Key.Key_F:
-            if self.key_callback is not None:
-                self.key_callback("f")
-            event.accept()
-            return
-
-        if self.gesture_enabled:
-            return
-
-        manual_keys = {
-            QtCore.Qt.Key.Key_Left,
-            QtCore.Qt.Key.Key_Right,
-            QtCore.Qt.Key.Key_Up,
-            QtCore.Qt.Key.Key_Down,
-            QtCore.Qt.Key.Key_Comma,
-            QtCore.Qt.Key.Key_S,
-            QtCore.Qt.Key.Key_Period,
-        }
-        if event.key() in manual_keys:
-            self.manual_keys.add(event.key())
-            self._send_manual_control()
+        if self._handle_key_press(event.key(), event.isAutoRepeat()):
             event.accept()
             return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
-        if event.key() in self.manual_keys:
-            self.manual_keys.discard(event.key())
-            self._send_manual_control()
+        if self._handle_key_release(event.key()):
             event.accept()
             return
         super().keyReleaseEvent(event)
@@ -245,6 +430,9 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.labels["signal"].setText(f"{state.get('wifi', '--')} dBm")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        application = QtWidgets.QApplication.instance()
+        if application is not None:
+            application.removeEventFilter(self)
         self.manual_timer.stop()
         self.manual_keys.clear()
         self.tello.send_rc_control(0, 0, 0, 0)
@@ -369,6 +557,14 @@ def main() -> None:
                 airborne = True
                 follow_enabled = False
                 target_palm_width = None
+            elif key == "l" and not window.gesture_enabled and airborne:
+                follow_enabled = False
+                target_palm_width = None
+                tello.send_rc_control(0, 0, 0, 0)
+                window._clear_pending_commands()
+                submit("land", tello.land)
+                window.labels["mode"].setText("Landing requested")
+                airborne = False
 
         def process_camera() -> None:
             run_gesture_recognition(
