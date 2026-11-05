@@ -110,6 +110,7 @@ def classify_gesture(hand_landmarks) -> str:
 def main(
     on_gesture: Callable[[str], None] | None = None,
     frame_provider: Callable[[], NDArray[np.uint8] | None] | None = None,
+    on_hand=None,
 ) -> None:
     ensure_model()
     options = vision.HandLandmarkerOptions(
@@ -147,6 +148,10 @@ def main(
                         raise RuntimeError("No camera frame source is available.")
                     frame = frame_provider()
                     if frame is None:
+                        if on_hand is not None:
+                            on_hand(None)
+                        if cv2.waitKey(1) & 0xFF == ord("q"):
+                            break
                         time.sleep(0.01)
                         continue
 
@@ -184,6 +189,10 @@ def main(
                     if stable_gesture != "none" and on_gesture is not None:
                         on_gesture(stable_gesture)
                     last_reported_gesture = stable_gesture
+
+                if on_hand is not None:
+                    hand = results.hand_landmarks[0] if results.hand_landmarks else None
+                    on_hand(hand)
 
                 cv2.putText(
                     frame,
