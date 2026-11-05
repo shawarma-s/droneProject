@@ -17,6 +17,37 @@ If hand is no longer detected stop movement descend slowly and deactivate
 **Mediapipe hand landmarks diagram:**
 ![alt text](hand_landmarks.png)
 
+## Telemetry
+- Receive telemetry data from the drone to the host laptop
+- Accelerometer, distance sensor, gyroscrope readings, battery status, signal strength
+- Create a second window (apart from the camera view) that has an interface showing telemetry data, a picture of the drone that rotates as the actual drone does (use the gryo and/or accelerometer to get the data to transform the image)
+- Window also has a button that allows the user to enable/disable gesture control and take over manual control of the drone using the keyboard (arrow keys for movement, comma and period for down and up respectively, f for do a flip if it's possible)
+- Window also shows signal strenght, battery level, etc.
+
+Run the telemetry window separately while the drone is connected to the Tello
+Wi-Fi network:
+
+```bash
+python telemetry.py
+```
+
+The window reads the Tello's cached state data and displays battery, height,
+time-of-flight distance, pitch, roll, yaw, acceleration, and Wi-Fi signal.
+The drone indicator rotates using the reported yaw. Use the mode button to
+switch between gesture and manual mode. In manual mode, focus the telemetry
+window and use the arrow keys for horizontal movement, `,` and `.` for down
+and up, and `F` for a forward flip when supported by the drone.
+
+The telemetry window sends commands through its own worker queue so a slow
+Tello response does not block the Qt interface. In this combined mode it also
+starts the Tello video stream and launches the MediaPipe camera-control loop;
+the annotated camera feed appears in the `Hand Tracking` window. Close the
+telemetry window or press `Q` in the camera window to stop and land.
+
+Use either `telemetry.py` for the combined telemetry, video, and gesture
+session, or `droneControl.py` for the camera-control-only session. Do not run
+both scripts at the same time; both would try to control the same Tello.
+
 ## Workspace setup
 
 Each contributor should create their own Python virtual environment locally. Do not
@@ -74,13 +105,15 @@ python -c "import cv2; import djitellopy; print('environment OK')"
 In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 `.venv`.
 
-## Run gesture recognition with the Tello camera (dry-run)
+## Run gesture control with the Tello camera
 
-This connects to the Tello, starts its video stream, and runs gesture recognition
-on the drone camera feed. Recognized
-commands are printed to the terminal only; no takeoff or movement commands are
-sent to the drone. Takeoff is disabled. Follow mode is recognized but does not
-control flight yet.
+This connects to the Tello, starts its video stream, and runs gesture control
+on the drone camera feed. The drone takes off and begins gesture control at
+its normal takeoff height. Each stable movement gesture moves the drone 10 cm. The `land` gesture and
+pressing **Q** land the drone. Press **F** in the video window to take off
+again after landing. Follow mode uses the hand's horizontal position, vertical
+position, and apparent size to attempt to keep the hand centered and at a
+consistent distance.
 
 1. Power on the Tello and connect your computer to the drone's Wi-Fi network.
 2. Run this from the repository root:
@@ -89,8 +122,12 @@ control flight yet.
    .\.venv\Scripts\python.exe droneControl.py
    ```
 
-Press **Q** in the video window to quit. If the connection fails, confirm that
-your computer is connected to the Tello's Wi-Fi and try again.
+Press **Q** in the video window to land and stop. If the connection fails,
+confirm that your computer is connected to the Tello's Wi-Fi and try again.
+
+Do not run this with people, obstacles, or fragile objects nearby. Keep a clear
+landing area and be ready to disconnect the battery if the drone behaves
+unexpectedly.
 
 Before committing, check that local files are ignored:
 

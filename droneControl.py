@@ -1,21 +1,144 @@
-from djitellopy import Tello, tello
+import queue
+import threading
+from collections.abc import Callable
+
+from djitellopy import Tello
 
 from imageProcessing import main as run_gesture_recognition
 
 
-def report_run_command(gesture: str) -> None:
-    if gesture == "standby":
-        print("Recognized standby gesture; Drone is on standby, awaiting commands.")
-    elif gesture == "follow":
-        print("Recognized follow gesture; follow control is not enabled.")
-    else:
-        print(f"Recognized command: {gesture} [dry run; no command sent]")
+MOVEMENT_DISTANCE_CM = 20
+FOLLOW_DEAD_ZONE = 0.08
+FOLLOW_MAX_VELOCITY = 20
+FOLLOW_MAX_YAW = 30
 
 
 def main() -> None:
     tello = Tello()
     connected = False
+    airborne = False
     stream_started = False
+    follow_enabled = False
+    target_palm_width = None
+    command_queue: queue.Queue[tuple[str, Callable[[], None]]] = queue.Queue(maxsize=1)
+
+    def handle_gesture(gesture: str) -> None:
+        nonlocal airborne, follow_enabled, target_palm_width
+
+
+        if not airborne:
+            return
+
+        movement_commands = {
+            "move_left": tello.move_left,
+            "move_right": tello.move_right,
+            "move_up": tello.move_up,
+            "move_down": tello.move_down,
+            "move_forward": tello.move_forward,
+            "move_backward": tello.move_back,
+            }
+
+        if gesture == "land":
+            print("Landing gesture recognized. Landing the drone.")
+            if follow_enabled:
+                follow_enabled = False
+                target_palm_width = None
+                tello.send_rc_control(0, 0, 0, 0)
+            try:
+                command_queue.put_nowait(("land", tello.land))
+            except queue.Full:
+                print("Landing command is already queued.")
+            airborne = False
+        elif gesture == "standby":
+            print("Standby gesture recognized; holding position.")
+        elif gesture == "follow":
+            follow_enabled = True
+            target_palm_width = None
+            print("Follow enabled. Hold your palm facing the camera.")
+        elif follow_enabled:
+            return
+        elif gesture in movement_commands:
+            print(f"Recognized {gesture}; moving {MOVEMENT_DISTANCE_CM} cm.")
+            command = movement_commands[gesture]
+            try:
+                command_queue.put_nowait(
+                    (gesture, lambda command=command: command(MOVEMENT_DISTANCE_CM))
+                )
+            except queue.Full:
+                print("Skipping movement; the previous command is still queued.")
+
+    def update_follow(hand):
+        nonlocal target_palm_width
+
+        if not airborne or not follow_enabled:
+            return
+
+        if hand is None:
+            tello.send_rc_control(0, 0, 0, 0)
+            return
+
+        # Index and pinky knuckles mark opposite sides of the palm.
+        index = hand[5]
+        pinky = hand[17]
+        center_x = (index.x + pinky.x) / 2
+        palm_width = ((index.x - pinky.x)**2 + (index.y - pinky.y)**2)**0.5
+
+        if palm_width < 0.01:
+            tello.send_rc_control(0, 0, 0, 0)
+            return
+
+        if target_palm_width is None:
+            target_palm_width = palm_width
+
+        # imageProcessing.py mirrors the frame with cv2.flip(frame, 1).
+        error_x = center_x - 0.5
+        error_y = (index.y + pinky.y) / 2 - 0.5
+        left_right = 0
+        if abs(error_x) > FOLLOW_DEAD_ZONE:
+            left_right = int(
+                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_x))
+            )
+
+        up_down = 0
+        if abs(error_y) > FOLLOW_DEAD_ZONE:
+            up_down = int(
+                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_y))
+            )
+
+        # Smaller palm: move forward. Larger palm: move backward.
+        ratio = palm_width / target_palm_width
+        forward = 0
+        if ratio < 0.85:
+            forward = FOLLOW_MAX_VELOCITY
+        elif ratio > 1.15:
+            forward = -FOLLOW_MAX_VELOCITY
+
+        yaw = 0
+        if abs(error_x) > FOLLOW_DEAD_ZONE:
+            yaw = int(max(-FOLLOW_MAX_YAW, min(FOLLOW_MAX_YAW, -60 * error_x)))
+
+        tello.send_rc_control(left_right, forward, up_down, yaw)
+
+    def handle_key(key: str) -> None:
+        nonlocal airborne, follow_enabled, target_palm_width
+
+        if key != "f" or airborne:
+            return
+
+        def takeoff() -> None:
+            nonlocal airborne
+            print("Takeoff requested. Sending takeoff command...")
+            tello.takeoff()
+            airborne = True
+            print("Takeoff completed. Gesture control is active.")
+
+        try:
+            command_queue.put_nowait(("takeoff", takeoff))
+            follow_enabled = False
+            target_palm_width = None
+        except queue.Full:
+            print("Cannot take off; another command is still queued.")
+
     try:
         print("Connecting to the Tello...")
         try:
@@ -31,6 +154,7 @@ def main() -> None:
         battery = tello.get_battery()
         print(f"Connected to the Tello. Battery: {battery}%")
         print("Starting the Tello video stream...")
+        #tello.set_video_fps(Tello.FPS_15)
         tello.streamon()
         stream_started = True
         frame_reader = tello.get_frame_read()
@@ -38,24 +162,34 @@ def main() -> None:
         
 
         print(
-            "Using the Tello camera in gesture dry-run mode. "
-            "The drone will remain landed and no flight commands will be sent."
+            "Gesture control is active. Each movement gesture moves the drone "
+            f"{MOVEMENT_DISTANCE_CM} cm."
         )
-        print("Press Q in the video window to stop.")
+        print("Press Q in the video window to land and stop.")
 
         run_gesture_recognition(
-            on_gesture=report_run_command,
+            on_gesture=handle_gesture,
             frame_provider=lambda: frame_reader.frame,
+            on_hand=update_follow,
+            on_key=handle_key,
         )
         
 
     finally:
         try:
-            if stream_started:
-                tello.streamoff()
+            if "command_stop" in locals():
+                command_stop.set()
+                if "command_thread" in locals():
+                    command_thread.join(timeout=2)
+            if airborne:
+                print("Landing the drone before shutdown.")
+                tello.land()
         finally:
-            tello.land()
-            tello.end()
+            try:
+                if stream_started:
+                    tello.streamoff()
+            finally:
+                tello.end()
         if connected:
             print("Disconnected from the Tello.")
 

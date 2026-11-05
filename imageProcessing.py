@@ -110,6 +110,9 @@ def classify_gesture(hand_landmarks) -> str:
 def main(
     on_gesture: Callable[[str], None] | None = None,
     frame_provider: Callable[[], NDArray[np.uint8] | None] | None = None,
+    on_hand=None,
+    on_key: Callable[[str], None] | None = None,
+    stop_event=None,
 ) -> None:
     ensure_model()
     options = vision.HandLandmarkerOptions(
@@ -138,6 +141,8 @@ def main(
     try:
         with vision.HandLandmarker.create_from_options(options) as hand_landmarker:
             while True:
+                if stop_event is not None and stop_event.is_set():
+                    break
                 if capture is not None:
                     ret, frame = capture.read()
                     if not ret:
@@ -147,6 +152,13 @@ def main(
                         raise RuntimeError("No camera frame source is available.")
                     frame = frame_provider()
                     if frame is None:
+                        if on_hand is not None:
+                            on_hand(None)
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord("q"):
+                            break
+                        if key == ord("f") and on_key is not None:
+                            on_key("f")
                         time.sleep(0.01)
                         continue
 
@@ -185,6 +197,10 @@ def main(
                         on_gesture(stable_gesture)
                     last_reported_gesture = stable_gesture
 
+                if on_hand is not None:
+                    hand = results.hand_landmarks[0] if results.hand_landmarks else None
+                    on_hand(hand)
+
                 cv2.putText(
                     frame,
                     f"Gesture: {stable_gesture}",
@@ -196,8 +212,11 @@ def main(
                 )
 
                 cv2.imshow("Hand Tracking", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
                     break
+                if key == ord("f") and on_key is not None:
+                    on_key("f")
     finally:
         if capture is not None:
             capture.release()
