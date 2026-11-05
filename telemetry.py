@@ -11,6 +11,9 @@ from imageProcessing import main as run_gesture_recognition
 
 
 MOVEMENT_DISTANCE_CM = 20
+FOLLOW_DEAD_ZONE = 0.08
+FOLLOW_MAX_VELOCITY = 20
+FOLLOW_MAX_YAW = 30
 
 
 class DroneIndicator(QtWidgets.QWidget):
@@ -22,6 +25,9 @@ class DroneIndicator(QtWidgets.QWidget):
     def set_yaw(self, yaw: float) -> None:
         self.yaw = yaw
         self.update()
+
+    def reset(self) -> None:
+        self.set_yaw(0.0)
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         del event
@@ -252,6 +258,7 @@ def main() -> None:
     stream_started = False
     airborne = False
     camera_thread: threading.Thread | None = None
+    window: TelemetryWindow | None = None
     try:
         print("Connecting to the Tello...")
         tello.connect()
@@ -264,13 +271,17 @@ def main() -> None:
 
         app = QtWidgets.QApplication(sys.argv)
         window = TelemetryWindow(tello, key_callback=lambda key: handle_key(key))
+        window.indicator.reset()
         window.show()
+
+        follow_enabled = False
+        target_palm_width: float | None = None
 
         def submit(name: str, command: Callable[[], None]) -> None:
             window._submit(name, command)
 
         def handle_gesture(gesture: str) -> None:
-            nonlocal airborne
+            nonlocal airborne, follow_enabled, target_palm_width
             if not window.gesture_enabled or not airborne:
                 return
 
@@ -283,8 +294,22 @@ def main() -> None:
                 "move_backward": tello.move_back,
             }
             if gesture == "land":
+                follow_enabled = False
+                target_palm_width = None
+                tello.send_rc_control(0, 0, 0, 0)
                 submit("land", tello.land)
                 airborne = False
+            elif gesture == "follow":
+                follow_enabled = True
+                target_palm_width = None
+                window.labels["mode"].setText(
+                    "Follow control enabled"
+                )
+                print("Follow enabled. Hold your palm facing the camera.")
+            elif gesture == "standby":
+                window.labels["mode"].setText("Standby: holding position")
+            elif follow_enabled:
+                return
             elif gesture in commands:
                 command = commands[gesture]
                 submit(
@@ -292,16 +317,64 @@ def main() -> None:
                     lambda command=command: command(MOVEMENT_DISTANCE_CM),
                 )
 
+        def update_follow(hand) -> None:
+            nonlocal target_palm_width
+            if not window.gesture_enabled or not airborne or not follow_enabled:
+                return
+            if hand is None:
+                tello.send_rc_control(0, 0, 0, 0)
+                return
+
+            index = hand[5]
+            pinky = hand[17]
+            center_x = (index.x + pinky.x) / 2
+            palm_width = ((index.x - pinky.x) ** 2 + (index.y - pinky.y) ** 2) ** 0.5
+            if palm_width < 0.01:
+                tello.send_rc_control(0, 0, 0, 0)
+                return
+            if target_palm_width is None:
+                target_palm_width = palm_width
+
+            error_x = center_x - 0.5
+            error_y = (index.y + pinky.y) / 2 - 0.5
+            left_right = (
+                int(max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_x)))
+                if abs(error_x) > FOLLOW_DEAD_ZONE
+                else 0
+            )
+            up_down = (
+                int(max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_y)))
+                if abs(error_y) > FOLLOW_DEAD_ZONE
+                else 0
+            )
+            ratio = palm_width / target_palm_width
+            forward = (
+                FOLLOW_MAX_VELOCITY
+                if ratio < 0.85
+                else -FOLLOW_MAX_VELOCITY
+                if ratio > 1.15
+                else 0
+            )
+            yaw = (
+                int(max(-FOLLOW_MAX_YAW, min(FOLLOW_MAX_YAW, -60 * error_x)))
+                if abs(error_x) > FOLLOW_DEAD_ZONE
+                else 0
+            )
+            tello.send_rc_control(left_right, forward, up_down, yaw)
+
         def handle_key(key: str) -> None:
-            nonlocal airborne
+            nonlocal airborne, follow_enabled, target_palm_width
             if key == "f" and not airborne:
                 submit("takeoff", tello.takeoff)
                 airborne = True
+                follow_enabled = False
+                target_palm_width = None
 
         def process_camera() -> None:
             run_gesture_recognition(
                 on_gesture=handle_gesture,
                 frame_provider=lambda: frame_reader.frame,
+                on_hand=update_follow,
                 on_key=handle_key,
                 stop_event=camera_stop,
             )
@@ -316,6 +389,8 @@ def main() -> None:
             camera_thread.join(timeout=2)
         if airborne:
             tello.land()
+        if window is not None:
+            window.indicator.reset()
         if stream_started:
             tello.streamoff()
         tello.end()
