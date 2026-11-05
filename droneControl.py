@@ -28,10 +28,6 @@ def main() -> None:
 
         if not airborne:
             return
-        if follow_enabled and gesture != "follow":
-            follow_enabled = False
-            target_palm_width = None
-            tello.send_rc_control(0, 0, 0, 0)
 
         movement_commands = {
             "move_left": tello.move_left,
@@ -44,6 +40,10 @@ def main() -> None:
 
         if gesture == "land":
             print("Landing gesture recognized. Landing the drone.")
+            if follow_enabled:
+                follow_enabled = False
+                target_palm_width = None
+                tello.send_rc_control(0, 0, 0, 0)
             try:
                 command_queue.put_nowait(("land", tello.land))
             except queue.Full:
@@ -55,6 +55,8 @@ def main() -> None:
             follow_enabled = True
             target_palm_width = None
             print("Follow enabled. Hold your palm facing the camera.")
+        elif follow_enabled:
+            return
         elif gesture in movement_commands:
             print(f"Recognized {gesture}; moving {MOVEMENT_DISTANCE_CM} cm.")
             command = movement_commands[gesture]

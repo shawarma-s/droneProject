@@ -57,8 +57,12 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.key_callback = key_callback
         self.gesture_enabled = True
         self.command_queue: queue.Queue[tuple[str, Callable[[], None]]] = queue.Queue(
-            maxsize=4
+            maxsize=1
         )
+        self.manual_keys: set[int] = set()
+        self.manual_timer = QtCore.QTimer(self)
+        self.manual_timer.timeout.connect(self._send_manual_control)
+        self.manual_timer.start(100)
         self.command_stop = threading.Event()
         self.command_thread = threading.Thread(
             target=self._run_commands,
@@ -94,6 +98,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         telemetry_layout.addRow("Wi-Fi signal:", self.labels["signal"])
 
         self.mode_button = QtWidgets.QPushButton("Disable gesture control")
+        self.mode_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.mode_button.clicked.connect(self.toggle_control_mode)
         self.indicator = DroneIndicator()
 
@@ -106,7 +111,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         layout.addWidget(
             QtWidgets.QLabel(
                 "Manual controls: arrows = horizontal, ,/. = down/up, "
-                "F = take off when landed"
+                "S or , = down; . = up; F = take off when landed"
             )
         )
 
@@ -137,15 +142,42 @@ class TelemetryWindow(QtWidgets.QWidget):
     def _show_command_error(self, message: str) -> None:
         self.labels["mode"].setText(message)
 
+    def _send_manual_control(self) -> None:
+        if self.gesture_enabled:
+            return
+
+        left_right = 0
+        forward = 0
+        up_down = 0
+        if QtCore.Qt.Key.Key_Left in self.manual_keys:
+            left_right -= 20
+        if QtCore.Qt.Key.Key_Right in self.manual_keys:
+            left_right += 20
+        if QtCore.Qt.Key.Key_Up in self.manual_keys:
+            forward += 20
+        if QtCore.Qt.Key.Key_Down in self.manual_keys:
+            forward -= 20
+        if (
+            QtCore.Qt.Key.Key_Comma in self.manual_keys
+            or QtCore.Qt.Key.Key_S in self.manual_keys
+        ):
+            up_down -= 20
+        if QtCore.Qt.Key.Key_Period in self.manual_keys:
+            up_down += 20
+
+        self.tello.send_rc_control(left_right, forward, up_down, 0)
+
     def toggle_control_mode(self) -> None:
         self.gesture_enabled = not self.gesture_enabled
         if self.gesture_enabled:
+            self.manual_keys.clear()
+            self.tello.send_rc_control(0, 0, 0, 0)
             self.labels["mode"].setText("Gesture control enabled")
             self.mode_button.setText("Disable gesture control")
         else:
             self.labels["mode"].setText("Manual control enabled")
             self.mode_button.setText("Enable gesture control")
-            self._submit("stop", lambda: self.tello.send_rc_control(0, 0, 0, 0))
+            self.setFocus()
 
         if self.command_callback is not None:
             self.command_callback("gesture_enabled" if self.gesture_enabled else "manual")
@@ -160,20 +192,29 @@ class TelemetryWindow(QtWidgets.QWidget):
         if self.gesture_enabled:
             return
 
-        commands = {
-            QtCore.Qt.Key.Key_Left: ("left", lambda: self.tello.move_left(20)),
-            QtCore.Qt.Key.Key_Right: ("right", lambda: self.tello.move_right(20)),
-            QtCore.Qt.Key.Key_Up: ("forward", lambda: self.tello.move_forward(20)),
-            QtCore.Qt.Key.Key_Down: ("backward", lambda: self.tello.move_back(20)),
-            QtCore.Qt.Key.Key_Comma: ("down", lambda: self.tello.move_down(20)),
-            QtCore.Qt.Key.Key_Period: ("up", lambda: self.tello.move_up(20)),
+        manual_keys = {
+            QtCore.Qt.Key.Key_Left,
+            QtCore.Qt.Key.Key_Right,
+            QtCore.Qt.Key.Key_Up,
+            QtCore.Qt.Key.Key_Down,
+            QtCore.Qt.Key.Key_Comma,
+            QtCore.Qt.Key.Key_S,
+            QtCore.Qt.Key.Key_Period,
         }
-        command = commands.get(event.key())
-        if command is not None:
-            self._submit(*command)
+        if event.key() in manual_keys:
+            self.manual_keys.add(event.key())
+            self._send_manual_control()
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.key() in self.manual_keys:
+            self.manual_keys.discard(event.key())
+            self._send_manual_control()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
     def update_telemetry(self) -> None:
         state = self.tello.get_current_state()
@@ -198,6 +239,9 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.labels["signal"].setText(f"{state.get('wifi', '--')} dBm")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self.manual_timer.stop()
+        self.manual_keys.clear()
+        self.tello.send_rc_control(0, 0, 0, 0)
         self.command_stop.set()
         self.command_thread.join(timeout=2)
         event.accept()
