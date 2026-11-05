@@ -8,6 +8,8 @@ from imageProcessing import main as run_gesture_recognition
 
 
 MOVEMENT_DISTANCE_CM = 20
+FOLLOW_DEAD_ZONE = 0.08
+FOLLOW_MAX_VELOCITY = 20
 
 
 def main() -> None:
@@ -86,20 +88,49 @@ def main() -> None:
             target_palm_width = palm_width
 
         # imageProcessing.py mirrors the frame with cv2.flip(frame, 1).
-        error_x = 0.5 - center_x
-        yaw = 0
-        if abs(error_x) > 0.08:
-            yaw = int(max(-20, min(20, 60 * error_x)))
+        error_x = center_x - 0.5
+        error_y = (index.y + pinky.y) / 2 - 0.5
+        left_right = 0
+        if abs(error_x) > FOLLOW_DEAD_ZONE:
+            left_right = int(
+                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, 60 * error_x))
+            )
 
-        # Smaller palm: move forward. Larger palm: move back.
+        up_down = 0
+        if abs(error_y) > FOLLOW_DEAD_ZONE:
+            up_down = int(
+                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_y))
+            )
+
+        # Smaller palm: move forward. Larger palm: move backward.
         ratio = palm_width / target_palm_width
         forward = 0
         if ratio < 0.85:
-            forward = 10
+            forward = FOLLOW_MAX_VELOCITY
         elif ratio > 1.15:
-            forward = -10
+            forward = -FOLLOW_MAX_VELOCITY
 
-        tello.send_rc_control(0, forward, 0, yaw)
+        tello.send_rc_control(left_right, forward, up_down, 0)
+
+    def handle_key(key: str) -> None:
+        nonlocal airborne, follow_enabled, target_palm_width
+
+        if key != "f" or airborne:
+            return
+
+        def takeoff() -> None:
+            nonlocal airborne
+            print("Takeoff requested. Sending takeoff command...")
+            tello.takeoff()
+            airborne = True
+            print("Takeoff completed. Gesture control is active.")
+
+        try:
+            command_queue.put_nowait(("takeoff", takeoff))
+            follow_enabled = False
+            target_palm_width = None
+        except queue.Full:
+            print("Cannot take off; another command is still queued.")
 
     try:
         print("Connecting to the Tello...")
@@ -152,6 +183,7 @@ def main() -> None:
             on_gesture=handle_gesture,
             frame_provider=lambda: frame_reader.frame,
             on_hand=update_follow,
+            on_key=handle_key,
         )
     finally:
         try:

@@ -86,8 +86,10 @@ In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 This connects to the Tello, starts its video stream, and runs gesture control
 on the drone camera feed. The drone takes off and begins gesture control at
 its normal takeoff height. Each stable movement gesture moves the drone 10 cm. The `land` gesture and
-pressing **Q** land the drone. Follow mode is recognized but does not control
-flight yet.
+pressing **Q** land the drone. Press **F** in the video window to take off
+again after landing. Follow mode uses the hand's horizontal position, vertical
+position, and apparent size to attempt to keep the hand centered and at a
+consistent distance.
 
 1. Power on the Tello and connect your computer to the drone's Wi-Fi network.
 2. Run this from the repository root:
