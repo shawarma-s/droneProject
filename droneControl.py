@@ -1,3 +1,7 @@
+import queue
+import threading
+from collections.abc import Callable
+
 from djitellopy import Tello
 
 from imageProcessing import main as run_gesture_recognition
@@ -13,6 +17,7 @@ def main() -> None:
     stream_started = False
     follow_enabled = False
     target_palm_width = None
+    command_queue: queue.Queue[tuple[str, Callable[[], None]]] = queue.Queue(maxsize=1)
 
     def handle_gesture(gesture: str) -> None:
         nonlocal airborne, follow_enabled, target_palm_width
@@ -32,12 +37,14 @@ def main() -> None:
             "move_down": tello.move_down,
             "move_forward": tello.move_forward,
             "move_backward": tello.move_back,
-             
-        }
+            }
 
         if gesture == "land":
             print("Landing gesture recognized. Landing the drone.")
-            tello.land()
+            try:
+                command_queue.put_nowait(("land", tello.land))
+            except queue.Full:
+                print("Landing command is already queued.")
             airborne = False
         elif gesture == "standby":
             print("Standby gesture recognized; holding position.")
@@ -47,7 +54,13 @@ def main() -> None:
             print("Follow enabled. Hold your palm facing the camera.")
         elif gesture in movement_commands:
             print(f"Recognized {gesture}; moving {MOVEMENT_DISTANCE_CM} cm.")
-            movement_commands[gesture](MOVEMENT_DISTANCE_CM)
+            command = movement_commands[gesture]
+            try:
+                command_queue.put_nowait(
+                    (gesture, lambda command=command: command(MOVEMENT_DISTANCE_CM))
+                )
+            except queue.Full:
+                print("Skipping movement; the previous command is still queued.")
 
     def update_follow(hand):
         nonlocal target_palm_width
@@ -111,6 +124,24 @@ def main() -> None:
         print("Taking off...")
         tello.takeoff()
         airborne = True
+        command_stop = threading.Event()
+
+        def run_commands() -> None:
+            while not command_stop.is_set() or not command_queue.empty():
+                try:
+                    _, command = command_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                try:
+                    command()
+                except Exception as error:
+                    print(f"Tello command failed: {error}")
+                finally:
+                    command_queue.task_done()
+
+        command_thread = threading.Thread(target=run_commands, daemon=True)
+        command_thread.start()
+
         print(
             "Gesture control is active. Each movement gesture moves the drone "
             f"{MOVEMENT_DISTANCE_CM} cm."
@@ -124,6 +155,10 @@ def main() -> None:
         )
     finally:
         try:
+            if "command_stop" in locals():
+                command_stop.set()
+                if "command_thread" in locals():
+                    command_thread.join(timeout=2)
             if airborne:
                 print("Landing the drone before shutdown.")
                 tello.land()
