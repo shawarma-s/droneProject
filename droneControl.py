@@ -10,6 +10,7 @@ from imageProcessing import main as run_gesture_recognition
 MOVEMENT_DISTANCE_CM = 20
 FOLLOW_DEAD_ZONE = 0.08
 FOLLOW_MAX_VELOCITY = 20
+FOLLOW_MAX_YAW = 30
 
 
 def main() -> None:
@@ -93,7 +94,7 @@ def main() -> None:
         left_right = 0
         if abs(error_x) > FOLLOW_DEAD_ZONE:
             left_right = int(
-                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, 60 * error_x))
+                max(-FOLLOW_MAX_VELOCITY, min(FOLLOW_MAX_VELOCITY, -60 * error_x))
             )
 
         up_down = 0
@@ -110,7 +111,11 @@ def main() -> None:
         elif ratio > 1.15:
             forward = -FOLLOW_MAX_VELOCITY
 
-        tello.send_rc_control(left_right, forward, up_down, 0)
+        yaw = 0
+        if abs(error_x) > FOLLOW_DEAD_ZONE:
+            yaw = int(max(-FOLLOW_MAX_YAW, min(FOLLOW_MAX_YAW, 60 * error_x)))
+
+        tello.send_rc_control(left_right, forward, up_down, yaw)
 
     def handle_key(key: str) -> None:
         nonlocal airborne, follow_enabled, target_palm_width
