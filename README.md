@@ -24,6 +24,30 @@ If hand is no longer detected stop movement descend slowly and deactivate
 - Window also has a button that allows the user to enable/disable gesture control and take over manual control of the drone using the keyboard (arrow keys for movement, comma and period for down and up respectively, f for do a flip if it's possible)
 - Window also shows signal strenght, battery level, etc.
 
+Run the telemetry window separately while the drone is connected to the Tello
+Wi-Fi network:
+
+```bash
+python telemetry.py
+```
+
+The window reads the Tello's cached state data and displays battery, height,
+time-of-flight distance, pitch, roll, yaw, acceleration, and Wi-Fi signal.
+The drone indicator rotates using the reported yaw. Use the mode button to
+switch between gesture and manual mode. In manual mode, focus the telemetry
+window and use the arrow keys for horizontal movement, `,` and `.` for down
+and up, and `F` for a forward flip when supported by the drone.
+
+The telemetry window sends commands through its own worker queue so a slow
+Tello response does not block the Qt interface. In this combined mode it also
+starts the Tello video stream and launches the MediaPipe camera-control loop;
+the annotated camera feed appears in the `Hand Tracking` window. Close the
+telemetry window or press `Q` in the camera window to stop and land.
+
+Use either `telemetry.py` for the combined telemetry, video, and gesture
+session, or `droneControl.py` for the camera-control-only session. Do not run
+both scripts at the same time; both would try to control the same Tello.
+
 ## Workspace setup
 
 Each contributor should create their own Python virtual environment locally. Do not

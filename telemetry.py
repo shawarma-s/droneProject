@@ -1,82 +1,274 @@
+from __future__ import annotations
+
+import queue
 import sys
-import PySide6.QtCore as QtCore
-from PySide6.QtCore import QTimer
+import threading
+from collections.abc import Callable
+
 from djitellopy import Tello
-from PySide6.QtCore import QTimer as qtt
-from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QFormLayout)
+from PySide6 import QtCore, QtGui, QtWidgets
+from imageProcessing import main as run_gesture_recognition
 
-class TelemetryWindow(QWidget):
-    def __init__(self):
+
+MOVEMENT_DISTANCE_CM = 20
+
+
+class DroneIndicator(QtWidgets.QWidget):
+    def __init__(self) -> None:
         super().__init__()
+        self.yaw = 0.0
+        self.setMinimumSize(260, 180)
 
-        self.setWindowTitle("Tello Telemetry")
-        self.resize(400, 450)
+    def set_yaw(self, yaw: float) -> None:
+        self.yaw = yaw
+        self.update()
 
-        self.gesture_enabled = False
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        del event
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QtGui.QColor("#20242b"))
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(-self.yaw)
 
-        # Labels whose values we will update later
-        self.battery_label = QLabel("-- %")
-        self.height_label = QLabel("-- cm")
-        self.roll_label = QLabel("-- °")
-        self.pitch_label = QLabel("-- °")
-        self.yaw_label = QLabel("-- °")
-        self.acceleration_label = QLabel("-- / -- / --")
-        self.signal_label = QLabel("--")
+        painter.setPen(QtGui.QPen(QtGui.QColor("#6ee7b7"), 3))
+        painter.setBrush(QtGui.QColor("#14532d"))
+        painter.drawRoundedRect(-70, -35, 140, 70, 18, 18)
+        painter.setBrush(QtGui.QColor("#fbbf24"))
+        painter.drawEllipse(-12, -12, 24, 24)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#60a5fa"), 3))
+        painter.drawLine(0, -35, 0, -75)
+        painter.drawLine(-12, -63, 0, -75)
+        painter.drawLine(12, -63, 0, -75)
 
-        # Arrange telemetry as rows
-        telemetry_layout = QFormLayout()
-        telemetry_layout.addRow("Battery:", self.battery_label)
-        telemetry_layout.addRow("Height:", self.height_label)
-        telemetry_layout.addRow("Roll:", self.roll_label)
-        telemetry_layout.addRow("Pitch:", self.pitch_label)
-        telemetry_layout.addRow("Yaw:", self.yaw_label)
-        telemetry_layout.addRow(
-            "Acceleration X / Y / Z:",
-            self.acceleration_label,
+
+class TelemetryWindow(QtWidgets.QWidget):
+    command_error = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        tello: Tello,
+        command_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        super().__init__()
+        self.tello = tello
+        self.command_callback = command_callback
+        self.gesture_enabled = True
+        self.command_queue: queue.Queue[tuple[str, Callable[[], None]]] = queue.Queue(
+            maxsize=4
         )
-        telemetry_layout.addRow("Wi-Fi SNR:", self.signal_label)
+        self.command_stop = threading.Event()
+        self.command_thread = threading.Thread(
+            target=self._run_commands,
+            daemon=True,
+        )
+        self.command_error.connect(self._show_command_error)
+        self.command_thread.start()
 
-        # Control-mode button
-        self.mode_label = QLabel("Selected mode: Manual")
-        self.mode_button = QPushButton("Enable gesture control")
+        self.setWindowTitle("Tello Telemetry and Control")
+        self.resize(440, 650)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+
+        self.labels = {
+            "battery": QtWidgets.QLabel("-- %"),
+            "height": QtWidgets.QLabel("-- cm"),
+            "distance": QtWidgets.QLabel("-- cm"),
+            "pitch": QtWidgets.QLabel("-- deg"),
+            "roll": QtWidgets.QLabel("-- deg"),
+            "yaw": QtWidgets.QLabel("-- deg"),
+            "acceleration": QtWidgets.QLabel("-- / -- / --"),
+            "signal": QtWidgets.QLabel("--"),
+            "mode": QtWidgets.QLabel("Gesture control enabled"),
+        }
+
+        telemetry_layout = QtWidgets.QFormLayout()
+        telemetry_layout.addRow("Battery:", self.labels["battery"])
+        telemetry_layout.addRow("Height:", self.labels["height"])
+        telemetry_layout.addRow("Distance:", self.labels["distance"])
+        telemetry_layout.addRow("Pitch:", self.labels["pitch"])
+        telemetry_layout.addRow("Roll:", self.labels["roll"])
+        telemetry_layout.addRow("Yaw:", self.labels["yaw"])
+        telemetry_layout.addRow("Acceleration X / Y / Z:", self.labels["acceleration"])
+        telemetry_layout.addRow("Wi-Fi signal:", self.labels["signal"])
+
+        self.mode_button = QtWidgets.QPushButton("Disable gesture control")
         self.mode_button.clicked.connect(self.toggle_control_mode)
+        self.indicator = DroneIndicator()
 
-        # Main window layout
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(QLabel("Drone telemetry"))
-        main_layout.addLayout(telemetry_layout)
-        main_layout.addWidget(self.mode_label)
-        main_layout.addWidget(self.mode_button)
-        main_layout.addWidget(
-            QLabel("Interface preview — drone control is not connected.")
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel("Drone telemetry"))
+        layout.addLayout(telemetry_layout)
+        layout.addWidget(self.indicator)
+        layout.addWidget(self.labels["mode"])
+        layout.addWidget(self.mode_button)
+        layout.addWidget(
+            QtWidgets.QLabel(
+                "Manual controls: arrows = horizontal, ,/. = down/up, "
+                "F = flip forward"
+            )
         )
 
-        self.setLayout(main_layout)
-
-        # Call update_telemetry every 100 ms
-        self.timer = QTimer(self)
+        self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.update_telemetry)
         self.timer.start(100)
+        self.camera_thread: threading.Thread | None = None
 
-    def toggle_control_mode(self):
+    def _run_commands(self) -> None:
+        while not self.command_stop.is_set() or not self.command_queue.empty():
+            try:
+                _, command = self.command_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                command()
+            except Exception as error:
+                self.command_error.emit(f"Command failed: {error}")
+            finally:
+                self.command_queue.task_done()
+
+    def _submit(self, name: str, command: Callable[[], None]) -> None:
+        try:
+            self.command_queue.put_nowait((name, command))
+        except queue.Full:
+            self.labels["mode"].setText("Command skipped: another command is pending")
+
+    def _show_command_error(self, message: str) -> None:
+        self.labels["mode"].setText(message)
+
+    def toggle_control_mode(self) -> None:
         self.gesture_enabled = not self.gesture_enabled
-
         if self.gesture_enabled:
-            self.mode_label.setText("Selected mode: Gesture")
-            self.mode_button.setText("Switch to manual control")
+            self.labels["mode"].setText("Gesture control enabled")
+            self.mode_button.setText("Disable gesture control")
         else:
-            self.mode_label.setText("Selected mode: Manual")
+            self.labels["mode"].setText("Manual control enabled")
             self.mode_button.setText("Enable gesture control")
+            self._submit("stop", lambda: self.tello.send_rc_control(0, 0, 0, 0))
 
-    def update_telemetry(self):
-        # Later: read cached drone telemetry and update the labels.
-        pass
+        if self.command_callback is not None:
+            self.command_callback("gesture_enabled" if self.gesture_enabled else "manual")
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if self.gesture_enabled:
+            return
+
+        commands = {
+            QtCore.Qt.Key.Key_Left: ("left", lambda: self.tello.move_left(20)),
+            QtCore.Qt.Key.Key_Right: ("right", lambda: self.tello.move_right(20)),
+            QtCore.Qt.Key.Key_Up: ("forward", lambda: self.tello.move_forward(20)),
+            QtCore.Qt.Key.Key_Down: ("backward", lambda: self.tello.move_back(20)),
+            QtCore.Qt.Key.Key_Comma: ("down", lambda: self.tello.move_down(20)),
+            QtCore.Qt.Key.Key_Period: ("up", lambda: self.tello.move_up(20)),
+            QtCore.Qt.Key.Key_F: ("flip", lambda: self.tello.flip_forward()),
+        }
+        command = commands.get(event.key())
+        if command is not None:
+            self._submit(*command)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def update_telemetry(self) -> None:
+        state = self.tello.get_current_state()
+        self.labels["battery"].setText(f"{state.get('bat', '--')} %")
+        self.labels["height"].setText(f"{state.get('h', '--')} cm")
+        self.labels["distance"].setText(f"{state.get('tof', '--')} cm")
+
+        pitch = state.get("pitch", "--")
+        roll = state.get("roll", "--")
+        yaw = state.get("yaw", "--")
+        self.labels["pitch"].setText(f"{pitch} deg")
+        self.labels["roll"].setText(f"{roll} deg")
+        self.labels["yaw"].setText(f"{yaw} deg")
+        self.indicator.set_yaw(float(yaw) if isinstance(yaw, (int, float)) else 0)
+
+        acceleration = (
+            state.get("agx", "--"),
+            state.get("agy", "--"),
+            state.get("agz", "--"),
+        )
+        self.labels["acceleration"].setText(" / ".join(map(str, acceleration)))
+        self.labels["signal"].setText(f"{state.get('wifi', '--')} dBm")
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self.command_stop.set()
+        self.command_thread.join(timeout=2)
+        event.accept()
+
+
+def main() -> None:
+    tello = Tello()
+    stream_started = False
+    airborne = False
+    camera_thread: threading.Thread | None = None
+    try:
+        print("Connecting to the Tello...")
+        tello.connect()
+        print(f"Battery: {tello.get_battery()}%")
+        tello.streamon()
+        stream_started = True
+        frame_reader = tello.get_frame_read()
+        tello.takeoff()
+        airborne = True
+
+        app = QtWidgets.QApplication(sys.argv)
+        window = TelemetryWindow(tello)
+        window.show()
+
+        def submit(name: str, command: Callable[[], None]) -> None:
+            window._submit(name, command)
+
+        def handle_gesture(gesture: str) -> None:
+            nonlocal airborne
+            if not window.gesture_enabled or not airborne:
+                return
+
+            commands = {
+                "move_left": tello.move_left,
+                "move_right": tello.move_right,
+                "move_up": tello.move_up,
+                "move_down": tello.move_down,
+                "move_forward": tello.move_forward,
+                "move_backward": tello.move_back,
+            }
+            if gesture == "land":
+                submit("land", tello.land)
+                airborne = False
+            elif gesture in commands:
+                command = commands[gesture]
+                submit(
+                    gesture,
+                    lambda command=command: command(MOVEMENT_DISTANCE_CM),
+                )
+
+        def handle_key(key: str) -> None:
+            nonlocal airborne
+            if key == "f" and not airborne:
+                submit("takeoff", tello.takeoff)
+                airborne = True
+
+        def process_camera() -> None:
+            run_gesture_recognition(
+                on_gesture=handle_gesture,
+                frame_provider=lambda: frame_reader.frame,
+                on_key=handle_key,
+                stop_event=camera_stop,
+            )
+
+        camera_stop = threading.Event()
+        app.aboutToQuit.connect(camera_stop.set)
+        camera_thread = threading.Thread(target=process_camera, daemon=True)
+        camera_thread.start()
+        sys.exit(app.exec())
+    finally:
+        if camera_thread is not None:
+            camera_thread.join(timeout=2)
+        if airborne:
+            tello.land()
+        if stream_started:
+            tello.streamoff()
+        tello.end()
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    window = TelemetryWindow()
-    window.show()
-
-    sys.exit(app.exec())
+    main()

@@ -112,6 +112,7 @@ def main(
     frame_provider: Callable[[], NDArray[np.uint8] | None] | None = None,
     on_hand=None,
     on_key: Callable[[str], None] | None = None,
+    stop_event=None,
 ) -> None:
     ensure_model()
     options = vision.HandLandmarkerOptions(
@@ -140,6 +141,8 @@ def main(
     try:
         with vision.HandLandmarker.create_from_options(options) as hand_landmarker:
             while True:
+                if stop_event is not None and stop_event.is_set():
+                    break
                 if capture is not None:
                     ret, frame = capture.read()
                     if not ret:
