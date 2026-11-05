@@ -49,10 +49,12 @@ class TelemetryWindow(QtWidgets.QWidget):
         self,
         tello: Tello,
         command_callback: Callable[[str], None] | None = None,
+        key_callback: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self.tello = tello
         self.command_callback = command_callback
+        self.key_callback = key_callback
         self.gesture_enabled = True
         self.command_queue: queue.Queue[tuple[str, Callable[[], None]]] = queue.Queue(
             maxsize=4
@@ -104,7 +106,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         layout.addWidget(
             QtWidgets.QLabel(
                 "Manual controls: arrows = horizontal, ,/. = down/up, "
-                "F = flip forward"
+                "F = take off when landed"
             )
         )
 
@@ -149,6 +151,12 @@ class TelemetryWindow(QtWidgets.QWidget):
             self.command_callback("gesture_enabled" if self.gesture_enabled else "manual")
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.key() == QtCore.Qt.Key.Key_F:
+            if self.key_callback is not None:
+                self.key_callback("f")
+            event.accept()
+            return
+
         if self.gesture_enabled:
             return
 
@@ -159,7 +167,6 @@ class TelemetryWindow(QtWidgets.QWidget):
             QtCore.Qt.Key.Key_Down: ("backward", lambda: self.tello.move_back(20)),
             QtCore.Qt.Key.Key_Comma: ("down", lambda: self.tello.move_down(20)),
             QtCore.Qt.Key.Key_Period: ("up", lambda: self.tello.move_up(20)),
-            QtCore.Qt.Key.Key_F: ("flip", lambda: self.tello.flip_forward()),
         }
         command = commands.get(event.key())
         if command is not None:
@@ -212,7 +219,7 @@ def main() -> None:
         airborne = True
 
         app = QtWidgets.QApplication(sys.argv)
-        window = TelemetryWindow(tello)
+        window = TelemetryWindow(tello, key_callback=lambda key: handle_key(key))
         window.show()
 
         def submit(name: str, command: Callable[[], None]) -> None:
