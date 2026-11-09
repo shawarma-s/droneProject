@@ -108,7 +108,6 @@ def classify_gesture(hand_landmarks) -> str:
         frozenset({"index", "middle", "ring", "pinky"}): "move_down",
         frozenset({"index", "ring", "pinky"}): "move_forward",
         frozenset({"index", "middle", "pinky"}): "move_backward",
-        frozenset({"middle", "ring", "pinky"}): "land",
         frozenset({"pinky"}): "follow",
     }
     return gestures.get(raised_fingers, "none")
@@ -126,9 +125,9 @@ def main(
         base_options=python.BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=vision.RunningMode.VIDEO,
         num_hands=1,
-        min_hand_detection_confidence=0.3,
+        min_hand_detection_confidence=0.5,
         min_hand_presence_confidence=0.3,
-        min_tracking_confidence=0.3,
+        min_tracking_confidence=0.5,
     )
 
     capture = None

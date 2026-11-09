@@ -479,6 +479,19 @@ def main() -> None:
         follow_enabled = False
         target_palm_width: float | None = None
         takeoff_pending = False
+        landing_pending = False
+
+        def handle_control_error(message: str) -> None:
+            nonlocal airborne, follow_enabled, target_palm_width
+            if message.startswith("RC command failed:"):
+                airborne = False
+                follow_enabled = False
+                target_palm_width = None
+                window.labels["mode"].setText(
+                    "RC control lost; press F to retry takeoff"
+                )
+
+        window.command_error.connect(handle_control_error)
 
         def submit(name: str, command: Callable[[], None]) -> bool:
             return window._submit(name, command)
@@ -496,13 +509,7 @@ def main() -> None:
                 "move_forward": tello.move_forward,
                 "move_backward": tello.move_back,
             }
-            if gesture == "land":
-                follow_enabled = False
-                target_palm_width = None
-                tello.send_rc_control(0, 0, 0, 0)
-                submit("land", tello.land)
-                airborne = False
-            elif gesture == "follow":
+            if gesture == "follow":
                 follow_enabled = True
                 target_palm_width = None
                 window.labels["mode"].setText(
@@ -566,8 +573,16 @@ def main() -> None:
             tello.send_rc_control(left_right, forward, up_down, yaw)
 
         def handle_key(key: str) -> None:
-            nonlocal airborne, follow_enabled, target_palm_width, takeoff_pending
-            if key == "f" and not airborne and not takeoff_pending:
+            nonlocal airborne, follow_enabled, target_palm_width
+            nonlocal takeoff_pending, landing_pending
+            if (
+                key == "f"
+                and not airborne
+                and not takeoff_pending
+                and not landing_pending
+            ):
+                window._clear_pending_commands()
+
                 def takeoff() -> None:
                     nonlocal airborne, takeoff_pending
                     try:
@@ -590,7 +605,17 @@ def main() -> None:
                 target_palm_width = None
                 tello.send_rc_control(0, 0, 0, 0)
                 window._clear_pending_commands()
-                submit("land", tello.land)
+
+                def land() -> None:
+                    nonlocal landing_pending
+                    try:
+                        tello.land()
+                    finally:
+                        landing_pending = False
+
+                landing_pending = True
+                if not submit("land", land):
+                    landing_pending = False
                 window.labels["mode"].setText("Landing requested")
                 airborne = False
 

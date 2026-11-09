@@ -5,9 +5,7 @@
 - Index, Middle, Ring and pinky up finger -> **move down**
 - index, ring, pinky up, middle down -> **move forward**
 - Index, middle, pinky up, ring down -> **move backwards**
-- index down, middle, ring and pinky up -> **land**
 - thumbs up -> **standby**
-- If hand is not detected -> wait 30 seconds before landing
 
 **Follow Mode:**
 - Only pinky pointing up -> 'attach' to the hand and keep it in frame by automatically following
@@ -109,9 +107,10 @@ In VS Code, use **Python: Select Interpreter** and choose the interpreter inside
 
 This connects to the Tello, starts its video stream, and runs gesture control
 on the drone camera feed. The drone takes off and begins gesture control at
-its normal takeoff height. Each stable movement gesture moves the drone 10 cm. The `land` gesture and
-pressing **Q** land the drone. Press **F** in the video window to take off
-again after landing. Follow mode uses the hand's horizontal position, vertical
+its normal takeoff height. Each stable movement gesture moves the drone 10 cm.
+Press **L** in manual mode to land, or press **Q** in the camera window to stop.
+Press **F** in the telemetry window after landing to take off
+again. Follow mode uses the hand's horizontal position, vertical
 position, and apparent size to attempt to keep the hand centered and at a
 consistent distance.
 

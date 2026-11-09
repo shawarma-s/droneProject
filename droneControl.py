@@ -38,18 +38,7 @@ def main() -> None:
             "move_backward": tello.move_back,
             }
 
-        if gesture == "land":
-            print("Landing gesture recognized. Landing the drone.")
-            if follow_enabled:
-                follow_enabled = False
-                target_palm_width = None
-                tello.send_rc_control(0, 0, 0, 0)
-            try:
-                command_queue.put_nowait(("land", tello.land))
-            except queue.Full:
-                print("Landing command is already queued.")
-            airborne = False
-        elif gesture == "standby":
+        if gesture == "standby":
             print("Standby gesture recognized; holding position.")
         elif gesture == "follow":
             follow_enabled = True
