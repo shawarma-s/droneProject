@@ -302,6 +302,18 @@ class TelemetryWindow(QtWidgets.QWidget):
     def _show_command_error(self, message: str) -> None:
         self.labels["mode"].setText(message)
 
+    def _send_rc_control(
+        self,
+        left_right: int,
+        forward: int,
+        up_down: int,
+        yaw: int,
+    ) -> None:
+        try:
+            self.tello.send_rc_control(left_right, forward, up_down, yaw)
+        except Exception as error:
+            self.command_error.emit(f"RC command failed: {error}")
+
     def _send_manual_control(self) -> None:
         if self.gesture_enabled:
             return
@@ -325,7 +337,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         if QtCore.Qt.Key.Key_Period in self.manual_keys:
             up_down += 20
 
-        self.tello.send_rc_control(left_right, forward, up_down, 0)
+        self._send_rc_control(left_right, forward, up_down, 0)
 
     def _manual_key_codes(self) -> set[int]:
         return {
@@ -384,7 +396,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.gesture_enabled = not self.gesture_enabled
         if self.gesture_enabled:
             self.manual_keys.clear()
-            self.tello.send_rc_control(0, 0, 0, 0)
+            self._send_rc_control(0, 0, 0, 0)
             self.labels["mode"].setText("Gesture control enabled")
             self.mode_button.setText("Disable gesture control")
         else:
@@ -435,7 +447,7 @@ class TelemetryWindow(QtWidgets.QWidget):
             application.removeEventFilter(self)
         self.manual_timer.stop()
         self.manual_keys.clear()
-        self.tello.send_rc_control(0, 0, 0, 0)
+        self._send_rc_control(0, 0, 0, 0)
         self.command_stop.set()
         self.command_thread.join(timeout=2)
         event.accept()

@@ -11,6 +11,13 @@ from mediapipe.tasks.python import vision
 from numpy.typing import NDArray
 
 
+def notify_callback(callback: Callable, value, name: str) -> None:
+    try:
+        callback(value)
+    except Exception as error:
+        print(f"{name} callback failed: {error}")
+
+
 MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -153,12 +160,12 @@ def main(
                     frame = frame_provider()
                     if frame is None:
                         if on_hand is not None:
-                            on_hand(None)
+                            notify_callback(on_hand, None, "Hand tracking")
                         key = cv2.waitKey(1) & 0xFF
                         if key == ord("q"):
                             break
                         if key == ord("f") and on_key is not None:
-                            on_key("f")
+                            notify_callback(on_key, "f", "Keyboard")
                         time.sleep(0.01)
                         continue
 
@@ -194,12 +201,12 @@ def main(
 
                 if stable_gesture != last_reported_gesture:
                     if stable_gesture != "none" and on_gesture is not None:
-                        on_gesture(stable_gesture)
+                        notify_callback(on_gesture, stable_gesture, "Gesture")
                     last_reported_gesture = stable_gesture
 
                 if on_hand is not None:
                     hand = results.hand_landmarks[0] if results.hand_landmarks else None
-                    on_hand(hand)
+                    notify_callback(on_hand, hand, "Hand tracking")
 
                 cv2.putText(
                     frame,
@@ -216,7 +223,7 @@ def main(
                 if key == ord("q"):
                     break
                 if key == ord("f") and on_key is not None:
-                    on_key("f")
+                    notify_callback(on_key, "f", "Keyboard")
     finally:
         if capture is not None:
             capture.release()
