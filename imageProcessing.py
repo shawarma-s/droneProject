@@ -126,9 +126,9 @@ def main(
         base_options=python.BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=vision.RunningMode.VIDEO,
         num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
+        min_hand_detection_confidence=0.3,
+        min_hand_presence_confidence=0.3,
+        min_tracking_confidence=0.3,
     )
 
     capture = None
@@ -142,7 +142,6 @@ def main(
     stable_gesture = "none"
     gesture_frames = 0
     required_stable_frames = 5
-    missing_hand_since = None
     last_reported_gesture = "none"
 
     try:
@@ -176,7 +175,6 @@ def main(
                 timestamp_ms += 1
 
                 if results.hand_landmarks:
-                    missing_hand_since = None
                     hand_landmarks = results.hand_landmarks[0]
                     draw_landmarks(frame, hand_landmarks)
                     gesture = classify_gesture(hand_landmarks)
@@ -190,14 +188,9 @@ def main(
                     if gesture_frames >= required_stable_frames:
                         stable_gesture = gesture
                 else:
-                    if missing_hand_since is None:
-                        missing_hand_since = time.monotonic()
                     previous_gesture = "none"
                     gesture_frames = 0
-                    if time.monotonic() - missing_hand_since >= 30:
-                        stable_gesture = "land"
-                    else:
-                        stable_gesture = "none"
+                    stable_gesture = "none"
 
                 if stable_gesture != last_reported_gesture:
                     if stable_gesture != "none" and on_gesture is not None:

@@ -284,11 +284,13 @@ class TelemetryWindow(QtWidgets.QWidget):
             finally:
                 self.command_queue.task_done()
 
-    def _submit(self, name: str, command: Callable[[], None]) -> None:
+    def _submit(self, name: str, command: Callable[[], None]) -> bool:
         try:
             self.command_queue.put_nowait((name, command))
+            return True
         except queue.Full:
             self.labels["mode"].setText("Command skipped: another command is pending")
+            return False
 
     def _clear_pending_commands(self) -> None:
         while True:
@@ -476,9 +478,10 @@ def main() -> None:
 
         follow_enabled = False
         target_palm_width: float | None = None
+        takeoff_pending = False
 
-        def submit(name: str, command: Callable[[], None]) -> None:
-            window._submit(name, command)
+        def submit(name: str, command: Callable[[], None]) -> bool:
+            return window._submit(name, command)
 
         def handle_gesture(gesture: str) -> None:
             nonlocal airborne, follow_enabled, target_palm_width
@@ -563,12 +566,25 @@ def main() -> None:
             tello.send_rc_control(left_right, forward, up_down, yaw)
 
         def handle_key(key: str) -> None:
-            nonlocal airborne, follow_enabled, target_palm_width
-            if key == "f" and not airborne:
-                submit("takeoff", tello.takeoff)
-                airborne = True
-                follow_enabled = False
-                target_palm_width = None
+            nonlocal airborne, follow_enabled, target_palm_width, takeoff_pending
+            if key == "f" and not airborne and not takeoff_pending:
+                def takeoff() -> None:
+                    nonlocal airborne, takeoff_pending
+                    try:
+                        tello.takeoff()
+                    except Exception:
+                        takeoff_pending = False
+                        raise
+                    airborne = True
+                    takeoff_pending = False
+                    window.labels["mode"].setText("Takeoff complete")
+
+                takeoff_pending = True
+                if not submit("takeoff", takeoff):
+                    takeoff_pending = False
+                else:
+                    follow_enabled = False
+                    target_palm_width = None
             elif key == "l" and not window.gesture_enabled and airborne:
                 follow_enabled = False
                 target_palm_width = None
