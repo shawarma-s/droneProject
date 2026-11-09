@@ -259,7 +259,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         controls_layout.addWidget(self.labels["mode"])
         controls_layout.addWidget(self.mode_button)
         hint = QtWidgets.QLabel(
-            "Manual: arrows move  •  S or , descend  •  . ascend  •  F take off  •  L land"
+            "Manual: arrows move  •  S or , descend  •  . ascend  •  F take off  •  L land  •  P flip"
         )
         hint.setObjectName("hint")
         hint.setWordWrap(True)
@@ -361,6 +361,11 @@ class TelemetryWindow(QtWidgets.QWidget):
         if key == QtCore.Qt.Key.Key_L:
             if not auto_repeat and not self.gesture_enabled and self.key_callback is not None:
                 self.key_callback("l")
+            return True
+
+        if key == QtCore.Qt.Key.Key_P:
+            if not auto_repeat and not self.gesture_enabled and self.key_callback is not None:
+                self.key_callback("p")
             return True
 
         if self.gesture_enabled or key not in self._manual_key_codes():
@@ -621,6 +626,9 @@ def main() -> None:
                     landing_pending = False
                 window.labels["mode"].setText("Landing requested")
                 airborne = False
+            elif key == "p" and not window.gesture_enabled and airborne:
+                if submit("flip", tello.flip_forward):
+                    window.labels["mode"].setText("Forward flip requested")
 
         def process_camera() -> None:
             run_gesture_recognition(
