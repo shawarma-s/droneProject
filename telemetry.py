@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+import time
 from collections.abc import Callable
 
 from djitellopy import Tello
@@ -403,7 +404,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.gesture_enabled = not self.gesture_enabled
         if self.gesture_enabled:
             self.manual_keys.clear()
-            window._send_rc_control(0, 0, 0, 0)
+            self._send_rc_control(0, 0, 0, 0)
             self.labels["mode"].setText("Gesture control enabled")
             self.mode_button.setText("Disable gesture control")
         else:
@@ -454,7 +455,7 @@ class TelemetryWindow(QtWidgets.QWidget):
             application.removeEventFilter(self)
         self.manual_timer.stop()
         self.manual_keys.clear()
-        window._send_rc_control(0, 0, 0, 0)
+        self._send_rc_control(0, 0, 0, 0)
         self.command_stop.set()
         self.command_thread.join(timeout=2)
         event.accept()
@@ -485,6 +486,7 @@ def main() -> None:
         target_palm_width: float | None = None
         takeoff_pending = False
         landing_pending = False
+        last_takeoff_time = 0.0
 
         def handle_control_error(message: str) -> None:
             nonlocal airborne, follow_enabled, target_palm_width
@@ -517,7 +519,7 @@ def main() -> None:
             if follow_enabled and gesture != "follow":
                 follow_enabled = False
                 target_palm_width = None
-                self._send_rc_control(0, 0, 0, 0)
+                window._send_rc_control(0, 0, 0, 0)
                 window.labels["mode"].setText("Gesture control enabled")
             if gesture == "follow":
                 follow_enabled = True
@@ -593,6 +595,7 @@ def main() -> None:
 
                 def takeoff() -> None:
                     nonlocal airborne, takeoff_pending
+                    nonlocal last_takeoff_time
                     try:
                         tello.takeoff()
                     except Exception:
@@ -600,6 +603,7 @@ def main() -> None:
                         raise
                     airborne = True
                     takeoff_pending = False
+                    last_takeoff_time = time.monotonic()
                     window.labels["mode"].setText("Takeoff complete")
 
                 takeoff_pending = True
@@ -627,7 +631,13 @@ def main() -> None:
                 window.labels["mode"].setText("Landing requested")
                 airborne = False
             elif key == "p" and not window.gesture_enabled and airborne:
-                if submit("flip", tello.flip_forward):
+                def flip() -> None:
+                    time_since_takeoff = time.monotonic() - last_takeoff_time
+                    if time_since_takeoff < 2:
+                        time.sleep(2 - time_since_takeoff)
+                    tello.flip_forward()
+
+                if submit("flip", flip):
                     window.labels["mode"].setText("Forward flip requested")
 
         def process_camera() -> None:
