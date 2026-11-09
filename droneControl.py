@@ -38,14 +38,17 @@ def main() -> None:
             "move_backward": tello.move_back,
             }
 
+        if follow_enabled and gesture != "follow":
+            follow_enabled = False
+            target_palm_width = None
+            tello.send_rc_control(0, 0, 0, 0)
+
         if gesture == "standby":
             print("Standby gesture recognized; holding position.")
         elif gesture == "follow":
             follow_enabled = True
             target_palm_width = None
             print("Follow enabled. Hold your palm facing the camera.")
-        elif follow_enabled:
-            return
         elif gesture in movement_commands:
             print(f"Recognized {gesture}; moving {MOVEMENT_DISTANCE_CM} cm.")
             command = movement_commands[gesture]

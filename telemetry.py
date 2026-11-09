@@ -398,7 +398,7 @@ class TelemetryWindow(QtWidgets.QWidget):
         self.gesture_enabled = not self.gesture_enabled
         if self.gesture_enabled:
             self.manual_keys.clear()
-            self._send_rc_control(0, 0, 0, 0)
+            window._send_rc_control(0, 0, 0, 0)
             self.labels["mode"].setText("Gesture control enabled")
             self.mode_button.setText("Disable gesture control")
         else:
@@ -449,7 +449,7 @@ class TelemetryWindow(QtWidgets.QWidget):
             application.removeEventFilter(self)
         self.manual_timer.stop()
         self.manual_keys.clear()
-        self._send_rc_control(0, 0, 0, 0)
+        window._send_rc_control(0, 0, 0, 0)
         self.command_stop.set()
         self.command_thread.join(timeout=2)
         event.accept()
@@ -509,6 +509,11 @@ def main() -> None:
                 "move_forward": tello.move_forward,
                 "move_backward": tello.move_back,
             }
+            if follow_enabled and gesture != "follow":
+                follow_enabled = False
+                target_palm_width = None
+                self._send_rc_control(0, 0, 0, 0)
+                window.labels["mode"].setText("Gesture control enabled")
             if gesture == "follow":
                 follow_enabled = True
                 target_palm_width = None
@@ -518,8 +523,6 @@ def main() -> None:
                 print("Follow enabled. Hold your palm facing the camera.")
             elif gesture == "standby":
                 window.labels["mode"].setText("Standby: holding position")
-            elif follow_enabled:
-                return
             elif gesture in commands:
                 command = commands[gesture]
                 submit(
